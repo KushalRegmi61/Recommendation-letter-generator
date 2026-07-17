@@ -853,11 +853,16 @@ def studentform2(request):
         naam = request.POST.get("naam")
         prof_name = request.POST.get("prof_name")
 
-        uuni = request.POST.get("university")
-        uni_program = request.POST.get("program_applied")
-        uni_deadline = request.POST.get("deadline")
+        from home.intake import parse_universities, save_universities
+        uni_rows = parse_universities(
+            names=request.POST.getlist("uni_name"),
+            countries=request.POST.getlist("uni_country"),
+            deadlines=request.POST.getlist("uni_deadline"),
+            programs=request.POST.getlist("uni_program"),
+        )
         aca_gpa = request.POST.get("gpa")
         aca_ranking = request.POST.get("tentative_ranking")
+        final_percentage = request.POST.get("final_percentage")
         file_transcript = request.FILES.get("transcript")
         file_cv = request.FILES.get("cv")
         file_photo = request.FILES.get('photo')
@@ -889,21 +894,13 @@ def studentform2(request):
         info.is_generated = False
         info.save()
 
-        uni_info = University(
-            uni_name = uuni,
-            uni_deadline = uni_deadline,
-            program_applied = uni_program,
-            application = info,
-        )
-        if University.objects.filter(application = info).exists():
-            uni = University.objects.get(application=info)
-            uni.delete()
-            
-        uni_info.save()
+        save_universities(info, uni_rows)
+        nearest_deadline = uni_rows[0]["uni_deadline"] if uni_rows else None
 
         academics_info = Academics(
             gpa = aca_gpa,
             tentative_ranking = aca_ranking,
+            final_percentage = final_percentage,
             application  = info,
         )
         
@@ -944,7 +941,7 @@ def studentform2(request):
             
         qualities_info.save()
 
-        send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {uni_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
+        send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
 
 
     return render(request, "student_success.html",{'roll':uroll, 'letter' : False, 'naam' : naam})

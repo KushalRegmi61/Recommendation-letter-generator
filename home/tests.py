@@ -1,4 +1,4 @@
-from django.test import TestCase, SimpleTestCase
+from django.test import TestCase, SimpleTestCase, override_settings
 
 from home.models import (
     Application, University, Academics, Department, Program,
@@ -217,3 +217,51 @@ class Studentform1PostTests(TestCase):
         self.assertEqual(app.strong_points, "Curious")
         self.assertEqual(app.name, "Dan Gurung")
         self.assertFalse(app.is_generated)
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class Studentform2PostTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BAR")
+        self.program = Program.objects.create(program_name="BE5", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="eve", roll_number="075BAR004",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="99999", name="Dr Basnet", email="b@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Eve", is_generated=False,
+        )
+
+    def _post_data(self):
+        return {
+            "roll": "075BAR004", "naam": "eve", "prof_name": "Dr Basnet",
+            "uni_name": ["MIT", "ETH"],
+            "uni_country": ["USA", "Switzerland"],
+            "uni_deadline": ["2026-12-15", ""],
+            "uni_program": ["MS CS", "PhD"],
+            "gpa": "3.9", "final_percentage": "88", "tentative_ranking": "Top 5%",
+            "eca": "Robotics club",
+        }
+
+    def test_saves_repeatable_universities_and_percentage(self):
+        resp = self.client.post("/studentform2", data=self._post_data())
+        self.assertEqual(resp.status_code, 200)
+        unis = University.objects.filter(application=self.app).order_by("uni_name")
+        self.assertEqual(unis.count(), 2)
+        self.assertEqual(unis[0].uni_name, "ETH")
+        self.assertEqual(unis[0].country, "Switzerland")
+        aca = Academics.objects.get(application=self.app)
+        self.assertEqual(aca.final_percentage, "88")
+
+    def test_duplicate_pending_is_rejected(self):
+        self.client.post("/studentform2", data=self._post_data())
+        self.assertEqual(
+            Application.objects.filter(
+                std=self.student, professor=self.prof, is_generated=False
+            ).count(),
+            1,
+        )
