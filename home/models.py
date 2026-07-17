@@ -100,9 +100,36 @@ class Application(models.Model):
     competitions_won = models.TextField(null=True,blank=True)
 
     prof_anecdote = models.TextField(null=True,blank=True)  # could be filled later by professor
-    
 
+    # --- FR-2 intake fields (Google Form parity) ---
+    first_name = models.CharField(max_length=100, null=True, blank=True)
+    middle_name = models.CharField(max_length=100, null=True, blank=True)
+    last_name = models.CharField(max_length=100, null=True, blank=True)
+    contact_number = models.CharField(max_length=20, null=True, blank=True)
+    applied_level = models.CharField(
+        max_length=20, null=True, blank=True,
+        choices=[
+            ('Masters', 'Masters'), ('PhD', 'PhD'),
+            ('Both', 'Both'), ('Other', 'Other'),
+        ],
+    )
+    known_roles = models.TextField(null=True, blank=True)   # CSV of selected roles
+    years_known = models.CharField(max_length=10, null=True, blank=True)
+    enrollment_batch = models.CharField(max_length=20, null=True, blank=True)
+    passed_year = models.CharField(max_length=20, null=True, blank=True)
+    professional_experience = models.TextField(null=True, blank=True)
+    strong_points = models.TextField(null=True, blank=True)
+    weak_points = models.TextField(null=True, blank=True)
 
+    # --- FR-5 generated-letter tracking (populated in Phase 3) ---
+    generated_at = models.DateTimeField(null=True, blank=True)
+    generated_template = models.ForeignKey(
+        'CustomTemplates', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='generated_applications',
+    )
+    generated_letter = models.FileField(
+        upload_to='generated_letters/', blank=True,
+    )
 
     def __str__(self):
         return str(self.name) + " " + str(self.professor)
@@ -139,6 +166,7 @@ class University(models.Model):
     uni_name = models.CharField(max_length=100,null=True,blank=True)
     uni_deadline = models.DateField(null=True,blank=True)
     program_applied = models.CharField(max_length=100,null=True,blank=True)
+    country = models.CharField(max_length=100, null=True, blank=True)
     application = models.ForeignKey(Application, on_delete= CASCADE)
 
     def __str__(self):
@@ -188,7 +216,8 @@ class Academics(models.Model):
     application = models.ForeignKey(Application, on_delete= CASCADE)
     gpa= models.CharField(max_length=50,null=True,blank=True)
     tentative_ranking= models.CharField(max_length=50,null=True,blank=True)
-    
+    final_percentage = models.CharField(max_length=50, null=True, blank=True)
+
     def __str__(self):
         return str(self.application) + " Academics"
 

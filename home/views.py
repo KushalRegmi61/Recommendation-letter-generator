@@ -568,9 +568,24 @@ def studentform1(request):
         uprof = request.POST.get("prof")
         known_year = request.POST.get("yrs")
         relationship_type = request.POST.get("relationship_type")
-        
+
+        # --- FR-2 new intake fields ---
+        first_name = request.POST.get("first_name")
+        middle_name = request.POST.get("middle_name")
+        last_name = request.POST.get("last_name")
+        contact_number = request.POST.get("contact_number")
+        applied_level = request.POST.get("applied_level")
+        known_roles = ",".join(request.POST.getlist("known_roles"))
+        enrollment_batch = request.POST.get("enrollment_batch")
+        passed_year = request.POST.get("passed_year")
+        professional_experience = request.POST.get("professional_experience")
+        strong_points = request.POST.get("strong_points")
+        weak_points = request.POST.get("weak_points")
+        from home.intake import compose_full_name
+        full_name = compose_full_name(first_name, middle_name, last_name) or request.POST.get("naam")
+
         s_project = request.POST.get("sproject")
-        is_project = request.POST.get("is_project")
+        is_project = request.POST.get("is_project") or "null"
         
         pro1 = request.POST.get("pro1")
         has_paper = request.POST.get("has_paper")
@@ -615,7 +630,7 @@ def studentform1(request):
                 if Application.objects.filter(std__username=naam, professor__name=prof.name).exists():
                     info = Application.objects.get(std__username=naam, professor__name=prof.name)
                     # update fields
-                    info.name = stu.username
+                    info.name = full_name
                     info.email = uemail
                     info.professor = prof
                     info.std = stu
@@ -637,10 +652,22 @@ def studentform1(request):
                     info.ranking_percentile = ranking_percentile
                     info.language_instruction = language_instruction
                     info.relationship_type = relationship_type
+                    info.first_name = first_name
+                    info.middle_name = middle_name
+                    info.last_name = last_name
+                    info.contact_number = contact_number
+                    info.applied_level = applied_level
+                    info.known_roles = known_roles
+                    info.years_known = known_year
+                    info.enrollment_batch = enrollment_batch
+                    info.passed_year = passed_year
+                    info.professional_experience = professional_experience
+                    info.strong_points = strong_points
+                    info.weak_points = weak_points
                     info.save()
                 else:
                     info = Application(
-                        name=stu.username,
+                        name=full_name,
                         email=uemail,
                         professor=prof,
                         std=stu,
@@ -662,6 +689,18 @@ def studentform1(request):
                         class_size=class_size if class_size else None,
                         ranking_percentile=ranking_percentile,
                         language_instruction=language_instruction,
+                        first_name=first_name,
+                        middle_name=middle_name,
+                        last_name=last_name,
+                        contact_number=contact_number,
+                        applied_level=applied_level,
+                        known_roles=known_roles,
+                        years_known=known_year,
+                        enrollment_batch=enrollment_batch,
+                        passed_year=passed_year,
+                        professional_experience=professional_experience,
+                        strong_points=strong_points,
+                        weak_points=weak_points,
                     )
                     info.save()
 
@@ -814,11 +853,16 @@ def studentform2(request):
         naam = request.POST.get("naam")
         prof_name = request.POST.get("prof_name")
 
-        uuni = request.POST.get("university")
-        uni_program = request.POST.get("program_applied")
-        uni_deadline = request.POST.get("deadline")
+        from home.intake import parse_universities, save_universities
+        uni_rows = parse_universities(
+            names=request.POST.getlist("uni_name"),
+            countries=request.POST.getlist("uni_country"),
+            deadlines=request.POST.getlist("uni_deadline"),
+            programs=request.POST.getlist("uni_program"),
+        )
         aca_gpa = request.POST.get("gpa")
         aca_ranking = request.POST.get("tentative_ranking")
+        final_percentage = request.POST.get("final_percentage")
         file_transcript = request.FILES.get("transcript")
         file_cv = request.FILES.get("cv")
         file_photo = request.FILES.get('photo')
@@ -850,21 +894,15 @@ def studentform2(request):
         info.is_generated = False
         info.save()
 
-        uni_info = University(
-            uni_name = uuni,
-            uni_deadline = uni_deadline,
-            program_applied = uni_program,
-            application = info,
-        )
-        if University.objects.filter(application = info).exists():
-            uni = University.objects.get(application=info)
-            uni.delete()
-            
-        uni_info.save()
+        save_universities(info, uni_rows)
+        # earliest upcoming deadline across submitted universities (ISO dates sort lexically)
+        _deadlines = [r["uni_deadline"] for r in uni_rows if r["uni_deadline"]]
+        nearest_deadline = min(_deadlines) if _deadlines else None
 
         academics_info = Academics(
             gpa = aca_gpa,
             tentative_ranking = aca_ranking,
+            final_percentage = final_percentage,
             application  = info,
         )
         
@@ -905,7 +943,7 @@ def studentform2(request):
             
         qualities_info.save()
 
-        send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {uni_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
+        send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
 
 
     return render(request, "student_success.html",{'roll':uroll, 'letter' : False, 'naam' : naam})

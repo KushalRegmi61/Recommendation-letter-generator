@@ -8,24 +8,44 @@
       <form method="POST", action="/studentform2" , enctype='multipart/form-data'>
       {% csrf_token %}
         <div class="user-details">
-          <div class="input-box">
-            <span class="details">Requesting University *</span>
-            <input type="text" placeholder="University Name" name="university" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Program Applied *</span>
-            <input type="text" placeholder="Program Applied" name="program_applied" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Deadline *</span>
-              <input type="date" name="deadline" required>
+          <div class="input-box" style="width:100%;">
+            <span class="details">Universities *</span>
+            <div id="universities">
+              <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                <input type="text" name="uni_name" placeholder="University name" required style="flex:2;min-width:150px;">
+                <input type="text" name="uni_country" placeholder="Country" required style="flex:1;min-width:100px;">
+                <input type="text" name="uni_program" placeholder="Program applied" style="flex:1;min-width:120px;">
+                <input type="date" name="uni_deadline" placeholder="Deadline" style="flex:1;min-width:130px;">
+                <button type="button" class="remove-uni" style="flex:none;">Remove</button>
+              </div>
             </div>
+            <button type="button" id="add-uni">+ Add another university</button>
+          </div>
+
+          <script>
+          document.getElementById('add-uni').addEventListener('click', function () {
+            var container = document.getElementById('universities');
+            var first = container.querySelector('.uni-row');
+            var clone = first.cloneNode(true);
+            clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+            container.appendChild(clone);
+          });
+          document.getElementById('universities').addEventListener('click', function (e) {
+            if (e.target.classList.contains('remove-uni')) {
+              var rows = this.querySelectorAll('.uni-row');
+              if (rows.length > 1) e.target.closest('.uni-row').remove();
+            }
+          });
+          </script>
 
           <div class="input-box">
             <span class="details">GPA: *</span>
             <input type="text" name="gpa" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Final Percentage Score *</span>
+            <input type="text" name="final_percentage" placeholder="e.g. 82.5" required>
           </div>
 
           <div class="input-box">
