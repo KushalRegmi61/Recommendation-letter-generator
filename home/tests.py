@@ -97,3 +97,41 @@ class PendingApplicationTests(TestCase):
         from home.intake import has_pending_application
         Application.objects.create(std=self.student, professor=self.prof, is_generated=True)
         self.assertFalse(has_pending_application(self.student, self.prof))
+
+
+class ParseUniversitiesTests(SimpleTestCase):
+    def test_zips_parallel_lists(self):
+        from home.intake import parse_universities
+        rows = parse_universities(
+            names=["MIT", "TU Delft"],
+            countries=["USA", "Netherlands"],
+            deadlines=["2026-12-15", "2027-01-10"],
+            programs=["MS CS", "MS EE"],
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], {
+            "uni_name": "MIT", "country": "USA",
+            "uni_deadline": "2026-12-15", "program_applied": "MS CS",
+        })
+
+    def test_skips_rows_with_blank_name(self):
+        from home.intake import parse_universities
+        rows = parse_universities(
+            names=["MIT", "  "], countries=["USA", "UK"],
+            deadlines=["2026-12-15", ""], programs=["MS", ""],
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["uni_name"], "MIT")
+
+    def test_blank_deadline_becomes_none(self):
+        from home.intake import parse_universities
+        rows = parse_universities(
+            names=["MIT"], countries=["USA"], deadlines=[""], programs=[""],
+        )
+        self.assertIsNone(rows[0]["uni_deadline"])
+
+    def test_ragged_lists_do_not_crash(self):
+        from home.intake import parse_universities
+        rows = parse_universities(names=["MIT"], countries=[], deadlines=[], programs=[])
+        self.assertEqual(rows[0]["country"], "")
+        self.assertIsNone(rows[0]["uni_deadline"])
