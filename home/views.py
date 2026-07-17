@@ -895,7 +895,9 @@ def studentform2(request):
         info.save()
 
         save_universities(info, uni_rows)
-        nearest_deadline = uni_rows[0]["uni_deadline"] if uni_rows else None
+        # earliest upcoming deadline across submitted universities (ISO dates sort lexically)
+        _deadlines = [r["uni_deadline"] for r in uni_rows if r["uni_deadline"]]
+        nearest_deadline = min(_deadlines) if _deadlines else None
 
         academics_info = Academics(
             gpa = aca_gpa,

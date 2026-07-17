@@ -258,6 +258,9 @@ class Studentform2PostTests(TestCase):
         self.assertEqual(aca.final_percentage, "88")
 
     def test_duplicate_pending_is_rejected(self):
+        # studentform2 fetches-and-updates the existing pending application (via
+        # Application.objects.get(std__username=..., professor__name=...)), so the
+        # count stays at 1 — i.e. this asserts no duplicate pending row is created.
         self.client.post("/studentform2", data=self._post_data())
         self.assertEqual(
             Application.objects.filter(
