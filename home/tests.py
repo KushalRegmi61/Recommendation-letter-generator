@@ -135,3 +135,40 @@ class ParseUniversitiesTests(SimpleTestCase):
         rows = parse_universities(names=["MIT"], countries=[], deadlines=[], programs=[])
         self.assertEqual(rows[0]["country"], "")
         self.assertIsNone(rows[0]["uni_deadline"])
+
+
+class SaveUniversitiesTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BME")
+        self.program = Program.objects.create(program_name="BE3", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="cara", roll_number="075BME002",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="77777", name="Dr Koirala", email="k@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(std=self.student, professor=self.prof)
+
+    def test_creates_rows(self):
+        from home.intake import save_universities
+        rows = [
+            {"uni_name": "MIT", "country": "USA", "uni_deadline": None, "program_applied": "MS"},
+            {"uni_name": "ETH", "country": "Switzerland", "uni_deadline": None, "program_applied": "PhD"},
+        ]
+        count = save_universities(self.app, rows)
+        self.assertEqual(count, 2)
+        self.assertEqual(University.objects.filter(application=self.app).count(), 2)
+        self.assertTrue(
+            University.objects.filter(application=self.app, uni_name="ETH", country="Switzerland").exists()
+        )
+
+    def test_replaces_existing_rows(self):
+        from home.intake import save_universities
+        University.objects.create(uni_name="OLD", application=self.app)
+        save_universities(self.app, [
+            {"uni_name": "NEW", "country": "UK", "uni_deadline": None, "program_applied": ""},
+        ])
+        names = list(University.objects.filter(application=self.app).values_list("uni_name", flat=True))
+        self.assertEqual(names, ["NEW"])

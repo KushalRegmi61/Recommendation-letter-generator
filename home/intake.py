@@ -45,3 +45,24 @@ def parse_universities(names, countries, deadlines, programs):
             "program_applied": (at(programs, i) or "").strip(),
         })
     return rows
+
+
+def save_universities(application, rows):
+    """Replace all University rows for an application with the given rows.
+
+    Mirrors the existing create-or-replace pattern used elsewhere in the
+    intake views. Returns the number of rows created.
+    """
+    from home.models import University
+    University.objects.filter(application=application).delete()
+    created = 0
+    for row in rows:
+        University.objects.create(
+            uni_name=row["uni_name"],
+            country=row.get("country", ""),
+            uni_deadline=row.get("uni_deadline"),
+            program_applied=row.get("program_applied", ""),
+            application=application,
+        )
+        created += 1
+    return created
