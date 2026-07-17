@@ -172,3 +172,48 @@ class SaveUniversitiesTests(TestCase):
         ])
         names = list(University.objects.filter(application=self.app).values_list("uni_name", flat=True))
         self.assertEqual(names, ["NEW"])
+
+
+class Studentform1PostTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCE")
+        self.program = Program.objects.create(program_name="BE4", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="dan", roll_number="075BCE003",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="88888", name="Dr Thapa", email="t@example.com",
+            department=self.dept,
+        )
+
+    def _post_data(self):
+        return {
+            "naam": "dan", "roll": "075BCE003",
+            "email": "dan@example.com",
+            "prof": "Dr Thapa|88888",
+            "first_name": "Dan", "middle_name": "", "last_name": "Gurung",
+            "contact_number": "9811111111",
+            "applied_level": "PhD",
+            "known_roles": ["instructor", "thesis supervisor"],
+            "yrs": "4",
+            "enrollment_batch": "075",
+            "passed_year": "2079",
+            "professional_experience": "TA for 2 years",
+            "strong_points": "Curious", "weak_points": "Impatient",
+        }
+
+    def test_saves_new_fields_on_application(self):
+        resp = self.client.post("/studentform1", data=self._post_data())
+        self.assertEqual(resp.status_code, 200)
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        self.assertEqual(app.first_name, "Dan")
+        self.assertEqual(app.last_name, "Gurung")
+        self.assertEqual(app.contact_number, "9811111111")
+        self.assertEqual(app.applied_level, "PhD")
+        self.assertEqual(app.known_roles, "instructor,thesis supervisor")
+        self.assertEqual(app.enrollment_batch, "075")
+        self.assertEqual(app.passed_year, "2079")
+        self.assertEqual(app.strong_points, "Curious")
+        self.assertEqual(app.name, "Dan Gurung")
+        self.assertFalse(app.is_generated)
