@@ -55,3 +55,17 @@ class ModelFieldTests(TestCase):
         )
         aca.refresh_from_db()
         self.assertEqual(aca.final_percentage, "82.5")
+
+
+class ComposeFullNameTests(SimpleTestCase):
+    def test_joins_all_three_parts(self):
+        from home.intake import compose_full_name
+        self.assertEqual(compose_full_name("Alice", "B", "Sharma"), "Alice B Sharma")
+
+    def test_skips_blank_middle(self):
+        from home.intake import compose_full_name
+        self.assertEqual(compose_full_name("Alice", "", "Sharma"), "Alice Sharma")
+
+    def test_strips_and_handles_none(self):
+        from home.intake import compose_full_name
+        self.assertEqual(compose_full_name("  Alice ", None, " Sharma"), "Alice Sharma")
