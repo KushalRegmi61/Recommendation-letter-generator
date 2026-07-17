@@ -1,55 +1,163 @@
-# reco_letter
+# Recommendation Letter Generator
 
-# How to run?
-================================================================================================================== 
-* Install the packages from package.json file 
-=> npm install
+A Django web application that lets students request Letters of Recommendation (LOR)
+from their professors, and lets professors review those requests and generate
+personalized recommendation letters (PDF/DOCX) from customizable templates.
 
-* Create a python virtual environment
-=> python -m venv venv
+Built for Tribhuvan University, IOE (BCT).
 
-* Activate virtual environment
-Firstly, go to the project directory.
-Then run,
-# In windows 
-=> ./venv/Scripts/Activate.ps1
-# In *Unix
-=> source venv/bin/activate
+---
 
-* Install all the requirements
-=> python -m pip install -r ./requirements.txt
+## Tech stack
 
-* Perform migration
-=> python manage.py migrate
+- **Python** 3.10+ (developed/tested on 3.12)
+- **Django** 5.1
+- **Database:** SQLite (`db.sqlite3`, committed — no external DB to provision)
+- **Letter generation:** Jinja2 templates → PDF (`fpdf`) / DOCX (`python-docx`)
+- **Email:** Gmail SMTP (OTP + notifications)
 
-* Create a superuser
-=> python manage.py createsuperuser
+---
 
-* Activate the server
-=> python manage.py runserver
+## Prerequisites
 
-* Open web browser and you know what to do, right?
-# For admin
-	1. Open admin panel
-	2. Create Programs: Example BE
-	3. Create Departments: Example BCT
-	4. Create Teacher info
-# Remember: You need to create a superuser for the teacher with his/her full name consisting of his/her unique id (available in the teacher's info) after a slash '/'. This is how the code works.
+- Python 3.10 or newer with `venv`
+- `git`
 
-# For student
-	1. Register
-	2. Login
-	3. Request for the recommendation letter
-	
-# For teacher 
-	1. Ask the admin to create your profile
-	2. Login
-	3. View requests (You can also view the list of students that you have recommended.)
-	4. Generate the recommendation letter 
-	
-==================================================================================================================
+There is **no Node/npm build step**. The old instructions mentioned `npm install`, but
+there is no `package.json`; the `node_modules/` folder only vendors `bootstrap-icons`.
 
-# We have used the app password for SMTP in the settings.py file. We may delete it due to security reasons. In case you get a SMTP error, you need to enable app password for a valid gmail account and use that password for SMTP in settings.py file.  
+---
 
-# Enjoy & have a good day.
-# Recommendation-Letter-Generator
+## Setup & run
+
+### 1. Clone
+
+```bash
+git clone https://github.com/KushalRegmi61/Recommendation-letter-generator.git
+cd Recommendation-letter-generator
+```
+
+### 2. Create and activate a virtual environment
+
+```bash
+python -m venv venv
+
+# Linux / macOS
+source venv/bin/activate
+
+# Windows (PowerShell)
+./venv/Scripts/Activate.ps1
+```
+
+### 3. Install dependencies
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+> **Heads-up — `requirements.txt` encoding.** This file is saved as **UTF-16**. On most
+> systems `pip` reads it fine, but if you get an encoding error (garbled characters, or
+> `UnicodeDecodeError`), convert it to UTF-8 first:
+>
+> ```bash
+> python -c "open('requirements.utf8.txt','w',encoding='utf-8').write(open('requirements.txt',encoding='utf-16').read())"
+> python -m pip install -r requirements.utf8.txt
+> rm requirements.utf8.txt
+> ```
+
+### 4. Apply migrations
+
+```bash
+python manage.py migrate
+```
+
+(The repo ships a populated `db.sqlite3`; migrations are already applied, but run this to
+be safe and after pulling changes.)
+
+### 5. Create an admin (superuser)
+
+```bash
+python manage.py createsuperuser
+```
+
+> **Important — teacher/superuser naming.** Teachers log in through Django's `User` model,
+> and the app recovers a teacher's ID from the user's full name. When you create a superuser
+> that is also a teacher, set the **full name** to `Full Name/<unique_id>`, where `<unique_id>`
+> matches the `TeacherInfo.unique_id` you create in the admin panel. Without the `/<unique_id>`
+> suffix, the teacher views will not resolve.
+
+### 6. Run the development server
+
+```bash
+python manage.py runserver
+```
+
+Open http://127.0.0.1:8000/ in your browser. The Django admin is at
+http://127.0.0.1:8000/admin/.
+
+---
+
+## First-time data setup (admin)
+
+Log in to the admin panel (`/admin/`) and create the reference data the app needs:
+
+1. **Programs** — e.g. `BE`
+2. **Departments** — e.g. `BCT`
+3. **Teacher info** — each professor's profile (name, `unique_id`, email, department, etc.)
+4. Create the professor's Django user with full name `Name/<unique_id>` (see step 5 above).
+
+---
+
+## Using the app
+
+### Student
+1. **Register**, then **log in**.
+2. Fill the **LOR request form** — personal details, program(s) applied for, target
+   **universities (repeatable: name + country + deadline)**, relationship with the professor,
+   academics (percentage, ranking), strong/weak points, and upload transcript / CV / photo.
+3. Submit the request to a professor. This creates a **pending application**; duplicate
+   pending requests to the same professor are prevented.
+
+### Teacher / Professor
+1. Ask the admin to create your `TeacherInfo` profile and matching superuser.
+2. **Log in** and view incoming requests and the students you have already recommended.
+3. Create/edit your recommendation **templates**, then **generate** the letter (PDF/DOCX).
+
+### Admin
+- Manage programs, departments, teachers, templates, and all application data via `/admin/`.
+
+---
+
+## Running tests
+
+```bash
+python manage.py test home          # run the app's test suite
+python manage.py test home.tests.ModelFieldTests   # a single test class
+```
+
+---
+
+## Email / SMTP
+
+Email (OTP and notifications) uses Gmail SMTP configured in `auth/settings.py`. If you hit an
+SMTP authentication error, generate a Gmail **App Password** for a valid account and set
+`EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` in `auth/settings.py`.
+
+> **Security note:** `auth/settings.py` currently contains a committed `SECRET_KEY`,
+> `DEBUG = True`, `ALLOWED_HOSTS = ['*']`, and email credentials. Rotate these and move them
+> to environment variables before deploying anywhere public.
+
+---
+
+## Project layout
+
+```
+auth/            Django project (settings, root urls, wsgi/asgi)
+home/            Main app: models, views, urls, forms, intake helpers, migrations, tests
+templates/       HTML templates (student/teacher/admin pages, letter templates)
+static/          CSS, fonts, images
+media/           Uploaded files (transcripts, CVs, photos, generated letters)
+db.sqlite3       SQLite database (committed)
+manage.py        Django management entry point
+```
