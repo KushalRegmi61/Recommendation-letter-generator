@@ -69,3 +69,31 @@ class ComposeFullNameTests(SimpleTestCase):
     def test_strips_and_handles_none(self):
         from home.intake import compose_full_name
         self.assertEqual(compose_full_name("  Alice ", None, " Sharma"), "Alice Sharma")
+
+
+class PendingApplicationTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BEX")
+        self.program = Program.objects.create(program_name="BE2", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="bob", roll_number="075BEX010",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="55555", name="Dr Rai", email="rai@example.com",
+            department=self.dept,
+        )
+
+    def test_false_when_no_application(self):
+        from home.intake import has_pending_application
+        self.assertFalse(has_pending_application(self.student, self.prof))
+
+    def test_true_when_pending_exists(self):
+        from home.intake import has_pending_application
+        Application.objects.create(std=self.student, professor=self.prof, is_generated=False)
+        self.assertTrue(has_pending_application(self.student, self.prof))
+
+    def test_false_when_only_generated_exists(self):
+        from home.intake import has_pending_application
+        Application.objects.create(std=self.student, professor=self.prof, is_generated=True)
+        self.assertFalse(has_pending_application(self.student, self.prof))
