@@ -268,3 +268,27 @@ class Studentform2PostTests(TestCase):
             ).count(),
             1,
         )
+
+
+class Studentform1RenderTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BEL")
+        self.program = Program.objects.create(program_name="BE6", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="fay", roll_number="075BEL005",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+
+    def test_form_has_new_fr2_inputs(self):
+        self.client.cookies["student"] = "fay"
+        resp = self.client.get("/studentform1")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        for field in [
+            'name="first_name"', 'name="middle_name"', 'name="last_name"',
+            'name="contact_number"', 'name="applied_level"', 'name="known_roles"',
+            'name="enrollment_batch"', 'name="passed_year"',
+            'name="professional_experience"', 'name="strong_points"',
+            'name="weak_points"',
+        ]:
+            self.assertIn(field, html, f"missing input: {field}")

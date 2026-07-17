@@ -20,6 +20,28 @@
             <span class="details">Requesting University</span>
             <input type="text" placeholder="University Name" name="university" required>
           </div> -->
+
+          <!-- FR-2: Personal Info -->
+          <div class="input-box">
+            <span class="details">First Name *</span>
+            <input type="text" placeholder="First Name" name="first_name" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Middle Name</span>
+            <input type="text" placeholder="Middle Name" name="middle_name">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Last Name *</span>
+            <input type="text" placeholder="Last Name" name="last_name" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Contact Number *</span>
+            <input type="tel" placeholder="e.g. 9800000000" name="contact_number" required>
+          </div>
+
           <div class="input-box">
             <span class="details">Campus Mail *</span>
             <input type="email" placeholder="Email" name="email" required>
@@ -49,6 +71,50 @@
           <div class="input-box">
             <span class="details">Relationship to professor</span>
             <input type="text" name="relationship_type" placeholder="e.g. instructor, advisor" />
+          </div>
+
+          <!-- FR-2: Known roles (multiple checkboxes) -->
+          <div class="gender-details">
+            <span class="gender-title">How does the professor know you? *</span>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="known_roles" value="instructor" id="role_instructor" />
+              <label class="form-check-label" for="role_instructor">Instructor</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="known_roles" value="supervisor in final year project" id="role_fyp" />
+              <label class="form-check-label" for="role_fyp">Supervisor in Final Year Project</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="known_roles" value="thesis supervisor" id="role_thesis" />
+              <label class="form-check-label" for="role_thesis">Thesis Supervisor</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="known_roles" value="Other" id="role_other" />
+              <label class="form-check-label" for="role_other">Other</label>
+            </div>
+          </div>
+
+          <!-- FR-2: Enrollment / Academic -->
+          <div class="input-box">
+            <span class="details">Enrollment Batch *</span>
+            <input type="text" placeholder="e.g. 075" name="enrollment_batch" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Passed Year</span>
+            <input type="text" placeholder="e.g. 2079" name="passed_year">
+          </div>
+
+          <!-- FR-2: Applied level -->
+          <div class="input-box">
+            <span class="details">Applying for Level *</span>
+            <select name="applied_level" required>
+              <option value="">--- Select ---</option>
+              <option value="Masters">Masters</option>
+              <option value="PhD">PhD</option>
+              <option value="Both">Both</option>
+              <option value="Other">Other</option>
+            </select>
           </div>
           
           <div class="input-box" >
@@ -145,6 +211,22 @@
           </div>
 
           
+          <!-- FR-2: Professional background and qualities -->
+          <div class="input-box">
+            <span class="details">Professional Experience</span>
+            <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc."></textarea>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Strong Points *</span>
+            <textarea name="strong_points" rows="3" placeholder="What are your key strengths?" required></textarea>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Weak Points *</span>
+            <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required></textarea>
+          </div>
+
           <!-- Personal Statement -->
           <style>
             .input-box textarea {
