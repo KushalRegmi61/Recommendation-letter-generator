@@ -12,6 +12,7 @@ Implement four functional requirements on the existing Django LOR Generator:
 - **FR-2 "Google Form" Intake** — replace sir's external Google Form with a *native in-app form* that captures **all** the Google Form's fields. No live Google integration (no webhook / Sheets API / CSV). The diagram's pipeline (Validate → Map Form Data → Check Duplicate → Create Pending Application) becomes ordinary Django form handling.
 - **FR-3 Professor Template Editing** — professors create, edit, customize, and save templates for reuse.
 - **FR-4 Student Filtering** — professors filter incoming applications by **Department**, **Country**, and **College/University**.
+- **FR-5 Generated-Letter Tracking** — professors track the letters they have already generated: the same FR-4 filters apply to the *generated* list, each carries a **generation timestamp**, and the professor can **re-download** a previously generated letter (and see which template was used).
 
 ## 2. Guiding decisions (approved)
 
@@ -57,6 +58,12 @@ Pending/generated status for the intake pipeline:
 
 - **Decision:** reuse the existing `Application.is_generated` boolean — a freshly submitted application is `is_generated=False` (= "pending"), a produced letter sets `is_generated=True` (= "generated"). Do **not** add a parallel `status` field; the many views that already branch on `is_generated` make a second representation a consistency hazard.
 
+Generated-letter tracking (FR-5) fields on `Application`:
+
+- `generated_at` — `DateTimeField(null=True, blank=True)`, set when a letter is produced. Enables dated, newest-first history.
+- `generated_template` — `ForeignKey(CustomTemplates, null=True, blank=True, on_delete=SET_NULL)`, records which template produced the letter.
+- `generated_letter` — `FileField(upload_to='generated_letters/', blank=True)`, stores the produced output so re-download returns the exact file (rather than re-rendering, which could drift if data/template changed).
+
 All new fields are `null=True, blank=True` except where the form marks them required (enforce "required" at the **form** layer, not the DB, to avoid breaking existing rows). One migration per logical group; run only `python manage.py test home` for touched areas during development.
 
 ## 4. FR-2 — Extended in-app intake
@@ -82,6 +89,16 @@ On the professor view (`Teacher.html` / the `teacher`/`loginTeacher` render path
 
 Implementation: read filter values from `request.GET`, build a `Q`/chained-filter queryset scoped to `professor__unique_id=<current>`, populate dropdown options from the distinct values present in that professor's applications. Filters are combinable (AND). Empty filter = show all. Preserve the existing pending/generated split in the dashboard.
 
+## 5b. FR-5 — Generated-letter tracking
+
+Extend the professor dashboard's existing *generated* list (`Application.filter(professor=..., is_generated=True)`) into a searchable history:
+
+- **Same filters as FR-4** apply to the generated list (Department / Country / College), so a professor can answer "whom have I recommended, for which country/school". Reuse the FR-4 queryset builder against the `is_generated=True` set.
+- **Timestamp:** display `generated_at`; default sort newest-first.
+- **Re-download:** a link serves the stored `generated_letter` file; show the `generated_template` name alongside. At generation time the letter view must (a) stamp `generated_at`, (b) save the produced file to `generated_letter`, and (c) record `generated_template`.
+
+This is dashboard/view work built directly on the FR-4 machinery plus the three §3 fields; no new intake or model beyond those fields.
+
 ## 6. FR-1 / FR-3 — Template library, editing, and selection
 
 **Model:** extend `CustomTemplates` to support **system (shared) templates** in addition to per-professor ones — e.g. make `professor` nullable and add `is_system` (a system template has `professor=NULL, is_system=True`), or a dedicated flag. Keep `is_default` semantics per professor.
@@ -103,8 +120,8 @@ Implementation: read filter values from `request.GET`, build a `Q`/chained-filte
 ## 8. Implementation phases
 
 1. **Phase 1 — Data model + intake (FR-2).** Add fields/migrations (§3), `University.country`, extend the intake form incl. repeatable universities + dedup + pending status. *Foundation for everything else.*
-2. **Phase 2 — Filtering (FR-4).** Professor dashboard filter bar over Phase-1 data.
-3. **Phase 3 — Templates (FR-1/FR-3).** System-template model change + seed migration + template selection at generation + "duplicate to edit". Consumes the richer §3 data in the render context.
+2. **Phase 2 — Filtering + tracking (FR-4, FR-5).** Professor dashboard filter bar over Phase-1 data; apply the same filters to the generated list; show `generated_at` and re-download of the stored letter. (The generation view's stamping of `generated_at` / `generated_template` / `generated_letter` lands with Phase 3 when template selection exists; until then, re-download degrades gracefully for pre-existing rows with no stored file.)
+3. **Phase 3 — Templates (FR-1/FR-3).** System-template model change + seed migration + template selection at generation + "duplicate to edit". Consumes the richer §3 data in the render context, and writes the FR-5 tracking fields (`generated_at`, `generated_template`, `generated_letter`) when a letter is produced.
 
 ## 9. Testing approach
 
@@ -113,6 +130,7 @@ Implementation: read filter values from `request.GET`, build a `Q`/chained-filte
 - **Form/intake:** required-field validation, file-size limits, repeatable-university parsing, duplicate-submission detection, correct creation of `Application` + related rows.
 - **Filtering:** querysets return the right applications for each single filter and combinations; dropdowns list only that professor's values.
 - **Templates:** system templates seed correctly; render fills all new context fields; "duplicate to my templates" produces an editable per-professor copy; generation selects the chosen template.
+- **Tracking (FR-5):** generating a letter stamps `generated_at`, stores `generated_letter`, and records `generated_template`; the generated list is filterable and sorts newest-first; re-download returns the stored file.
 
 ## 10. Risks & mitigations
 
