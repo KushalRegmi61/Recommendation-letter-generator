@@ -147,7 +147,9 @@ def apply_application_filters(queryset, params):
     """
     department = (params.get("department") or "").strip()
     if department:
-        queryset = queryset.filter(std__department__dept_name=department)
+        # ``icontains``: the dashboard renders this as a typeable combobox, so
+        # partial values must match. See Task 2 for the full rationale.
+        queryset = queryset.filter(std__department__dept_name__icontains=department)
     return queryset
 ```
 
@@ -197,6 +199,17 @@ Add these methods to `ApplicationFilterTests` in `home/tests.py`:
         )
         self.assertEqual([a.pk for a in result], [self.app_bct.pk])
 
+    def test_partial_and_case_insensitive_dropdown_values_match(self):
+        # The dropdowns are typeable comboboxes, so a half-typed value must work.
+        result = apply_application_filters(self.base_qs(), {"country": "us"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+        result = apply_application_filters(self.base_qs(), {"college": "delft"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+        result = apply_application_filters(self.base_qs(), {"department": "bct"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
     def test_no_duplicate_rows_when_application_has_many_universities(self):
         # A second USA university on the same application must not duplicate it.
         University.objects.create(
@@ -228,12 +241,16 @@ def apply_application_filters(queryset, params):
     country = (params.get("country") or "").strip()
     college = (params.get("college") or "").strip()
 
+    # ``icontains`` rather than exact: the dashboard renders these as typeable
+    # <datalist> comboboxes, so a professor may type a partial value ("United",
+    # "Kath") instead of picking one. Exact matching would silently return
+    # nothing and read as a broken filter.
     if department:
-        queryset = queryset.filter(std__department__dept_name=department)
+        queryset = queryset.filter(std__department__dept_name__icontains=department)
     if country:
-        queryset = queryset.filter(university__country=country)
+        queryset = queryset.filter(university__country__icontains=country)
     if college:
-        queryset = queryset.filter(university__uni_name=college)
+        queryset = queryset.filter(university__uni_name__icontains=college)
 
     if country or college:
         # ``university`` is a to-many join: without distinct() an application
@@ -246,7 +263,7 @@ def apply_application_filters(queryset, params):
 
 Run: `python manage.py test home.tests.ApplicationFilterTests -v 2`
 
-Expected: PASS (7 tests).
+Expected: PASS (8 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -525,7 +542,7 @@ cannot duplicate rows. Leave it as-is; this step is a check, not an edit.)
 
 Run: `python manage.py test home.tests.ApplicationFilterTests -v 2`
 
-Expected: PASS (18 tests).
+Expected: PASS (19 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -854,17 +871,26 @@ The view now supplies `filter_options` and `active_filters`, but nothing renders
 Add these methods to `TeacherDashboardViewTests`:
 
 ```python
-    def test_filter_bar_is_rendered_with_options(self):
+    def test_filter_bar_is_rendered_with_typeable_comboboxes(self):
         response = self.client.get("/teacher")
         self.assertContains(response, 'name="department"')
         self.assertContains(response, 'name="country"')
         self.assertContains(response, 'name="college"')
-        self.assertContains(response, ">Finland<")
-        self.assertContains(response, ">MIT<")
+        # Each field is an <input list=...> backed by a <datalist> of suggestions,
+        # so the professor can either pick a value or type a partial one.
+        self.assertContains(response, 'list="country-options"')
+        self.assertContains(response, '<datalist id="country-options">')
+        self.assertContains(response, '<option value="Finland">')
+        self.assertContains(response, '<option value="MIT">')
 
-    def test_selected_filter_is_marked_selected(self):
+    def test_active_filter_value_is_kept_in_the_box(self):
         response = self.client.get("/teacher", {"country": "USA"})
-        self.assertContains(response, '<option value="USA" selected>')
+        self.assertContains(response, 'value="USA"')
+
+    def test_partially_typed_filter_value_still_matches(self):
+        response = self.client.get("/teacher", {"country": "us"})
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
 
     def test_search_box_is_rendered_and_keeps_its_value(self):
         response = self.client.get("/teacher", {"q": "dan usa"})
@@ -899,30 +925,36 @@ Expected: FAIL — the three new tests fail because `Teacher.html` contains no f
     </div>
     <div class="col-auto">
       <label for="filter-department" class="form-label">Department</label>
-      <select class="form-select" id="filter-department" name="department">
-        <option value="">All departments</option>
+      <input class="form-control" id="filter-department" name="department"
+             list="department-options" placeholder="All departments"
+             value="{{ active_filters.department }}">
+      <datalist id="department-options">
         {% for option in filter_options.departments %}
-        <option value="{{ option }}" {% if option == active_filters.department %}selected{% endif %}>{{ option }}</option>
+        <option value="{{ option }}">
         {% endfor %}
-      </select>
+      </datalist>
     </div>
     <div class="col-auto">
       <label for="filter-country" class="form-label">Country</label>
-      <select class="form-select" id="filter-country" name="country">
-        <option value="">All countries</option>
+      <input class="form-control" id="filter-country" name="country"
+             list="country-options" placeholder="All countries"
+             value="{{ active_filters.country }}">
+      <datalist id="country-options">
         {% for option in filter_options.countries %}
-        <option value="{{ option }}" {% if option == active_filters.country %}selected{% endif %}>{{ option }}</option>
+        <option value="{{ option }}">
         {% endfor %}
-      </select>
+      </datalist>
     </div>
     <div class="col-auto">
       <label for="filter-college" class="form-label">College / University</label>
-      <select class="form-select" id="filter-college" name="college">
-        <option value="">All colleges</option>
+      <input class="form-control" id="filter-college" name="college"
+             list="college-options" placeholder="All colleges"
+             value="{{ active_filters.college }}">
+      <datalist id="college-options">
         {% for option in filter_options.colleges %}
-        <option value="{{ option }}" {% if option == active_filters.college %}selected{% endif %}>{{ option }}</option>
+        <option value="{{ option }}">
         {% endfor %}
-      </select>
+      </datalist>
     </div>
     <div class="col-auto">
       <button class="btn btn-primary" type="submit">Filter</button>
@@ -933,7 +965,9 @@ Expected: FAIL — the three new tests fail because `Teacher.html` contains no f
   </form>
 ```
 
-Django renders `{% if %}selected{% endif %}` with no space before `>`, producing `<option value="USA" selected>` — which is what the test asserts. Do not add whitespace inside the tag.
+`<datalist>` is deliberate over a JS combobox library (Select2, Tom Select, Choices.js): this project has no npm build step, so a library would mean a CDN `<script>` tag — which breaks offline demos and adds a dependency for behaviour the browser already provides. `<datalist>` gives type-to-filter *and* free typing with zero JavaScript.
+
+Note the `<option>` tags inside a `<datalist>` are value-only and self-closing in practice — no text content and no `</option>`, which is what the tests assert.
 
 **3b.** Replace the header row of the generated table (currently lines 43–47, the `<tr>` holding `Name` / `Email` / `Letter`) with:
 
@@ -966,7 +1000,7 @@ The em-dash fallbacks matter: every existing row has `generated_at=NULL` until P
 
 Run: `python manage.py test home.tests.TeacherDashboardViewTests -v 2`
 
-Expected: PASS (9 tests).
+Expected: PASS (10 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1160,7 +1194,9 @@ In `README.md`, under **Using the app → Teacher / Professor**, replace step 2 
 ```markdown
 2. **Log in** and view incoming requests and the students you have already recommended.
    Use the **filter bar** (Department / Country / College) to narrow both lists — for
-   example, "everyone I have recommended who applied to a university in the USA" — and
+   example, "everyone I have recommended who applied to a university in the USA". Each
+   filter box suggests the values present in your own applications, but you can also
+   type a partial value. Use
    the **search box** to find one student by name, roll number, or email. Search and
    filters combine.
    The recommended-students table shows when each letter was generated, which template
@@ -1178,7 +1214,7 @@ git commit -m "docs: document professor filtering and generated-letter tracking"
 
 ## Definition of done
 
-- A professor sees Department / Country / College dropdowns populated only from their own applications, plus a search box.
+- A professor sees Department / Country / College **typeable comboboxes** (`<input list>` + `<datalist>`) whose suggestions come only from their own applications, plus a search box. Typing a partial value (`us`, `delft`) matches; picking from the list also works.
 - Searching by student name, roll number, or email narrows both lists; search ANDs with the dropdowns.
 - Selecting filters narrows **both** the pending-requests list and the recommended-students table; filters AND together; "Clear" resets.
 - The recommended-students table sorts newest-generated first and shows generation time + template, with `—` where Phase 3 has not yet stamped them.
