@@ -151,7 +151,7 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ## Running tests
 
 ```bash
-python manage.py test home                          # run the app's test suite (70 tests)
+python manage.py test home                          # run the app's test suite (228 tests)
 python manage.py test home.tests.ModelFieldTests    # a single test class
 ```
 
