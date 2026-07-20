@@ -3572,6 +3572,12 @@ class SecuritySettingsTests(TestCase):
         self.assertNotEqual(dj.X_FRAME_OPTIONS, "ALLOWALL")
         self.assertIn(dj.X_FRAME_OPTIONS, ("DENY", "SAMEORIGIN"))
 
+    def test_framing_is_denied_outright(self):
+        # security.W019: nothing in this app frames itself, so SAMEORIGIN buys
+        # nothing and DENY is the correct value.
+        from django.conf import settings as dj
+        self.assertEqual(dj.X_FRAME_OPTIONS, "DENY")
+
     def test_session_cookies_are_httponly(self):
         from django.conf import settings as dj
         self.assertTrue(dj.SESSION_COOKIE_HTTPONLY)

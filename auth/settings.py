@@ -230,7 +230,10 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-X_FRAME_OPTIONS = "SAMEORIGIN"
+# Nothing in this app frames itself -- there is no <iframe>, <embed> or <object>
+# in any template -- so the stricter value costs nothing and closes clickjacking
+# against the letter-generation and account-management POST forms.
+X_FRAME_OPTIONS = "DENY"
 
 # --- Security -------------------------------------------------------------
 # Settings that would break plain-HTTP local development are tied to DEBUG.
