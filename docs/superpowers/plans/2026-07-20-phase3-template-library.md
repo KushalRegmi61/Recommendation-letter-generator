@@ -19,6 +19,33 @@
 - Never `git add CLAUDE.md` (it is gitignored and must stay untracked).
 - Existing suite: 73 tests in `home/tests.py`, 13 classes. Add new classes at the end of the file; put any new imports at the top with the existing imports.
 
+## Test fixture requirements (applies to EVERY task below)
+
+Several models have non-nullable FKs. The `setUp` blocks written inline in the tasks below are
+abbreviated; **every one of them must satisfy these required fields** or you get an
+`IntegrityError` instead of the failure the step predicts:
+
+- `TeacherInfo` requires `department` (FK, non-null).
+- `StudentLoginInfo` requires `department`, `program`, `password`, and `dob` in addition to
+  `username` and `roll_number`.
+- `Program` requires `department`.
+
+Use this canonical preamble at the top of each new test class's `setUp`, matching the pattern
+already used by `ApplicationFilterTests` (`home/tests.py:304`):
+
+```python
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+```
+
+then pass `department=self.dept` to every `TeacherInfo.objects.create(...)`, and
+`department=self.dept, program=self.program, password="x", dob="2000-01-01"` to every
+`StudentLoginInfo.objects.create(...)`.
+
+**`db.sqlite3` is tracked but is NOT committed with migrations.** Phase 1's migration commit
+(`0ea7aac`) left it out, and the README instructs users to run `migrate`. Running `migrate`
+will dirty your working tree; leave `db.sqlite3` uncommitted, and never `git add` it.
+
 ## Constraints discovered by inspection (do not violate)
 
 1. **PDF export encodes latin-1** (`views.py:2094`, `pdf.output(dest='S').encode('latin1')`). Every seeded template MUST be pure ASCII. No em dashes, no curly quotes, no ellipsis characters. Use `-`, `"`, `...`. Fixing latin-1 is explicitly out of scope for this phase.
