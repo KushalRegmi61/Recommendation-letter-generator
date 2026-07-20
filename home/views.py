@@ -1865,8 +1865,8 @@ def download_generated(request):
     back to the dashboard with an explanation instead of 500-ing.
     """
     unique = request.COOKIES.get("unique")
-    if not unique:
-        raise Http404("Not signed in as a professor.")
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
 
     # A missing or non-numeric id would otherwise reach the ORM and raise
     # ValueError, which surfaces as a 500 (and a debug traceback when

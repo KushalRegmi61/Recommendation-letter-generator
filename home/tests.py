@@ -782,6 +782,7 @@ class TeacherDashboardViewTests(TestCase):
             stored.generated_letter.delete(save=False)
 
 
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class DownloadGeneratedTests(TestCase):
     def setUp(self):
         dept = Department.objects.create(dept_name="BCT")
@@ -809,9 +810,6 @@ class DownloadGeneratedTests(TestCase):
         )
         self.client.cookies["unique"] = "T500"
 
-    def tearDown(self):
-        self.stored.generated_letter.delete(save=False)
-
     def test_returns_stored_file(self):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 200)
@@ -828,10 +826,17 @@ class DownloadGeneratedTests(TestCase):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 404)
 
-    def test_anonymous_request_is_not_served(self):
+    def test_anonymous_request_is_sent_to_the_login_page(self):
         del self.client.cookies["unique"]
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_unknown_professor_cookie_is_sent_to_the_login_page(self):
+        self.client.cookies["unique"] = "T-does-not-exist"
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
 
     def test_missing_id_parameter_is_not_served(self):
         response = self.client.get("/download_generated/")
