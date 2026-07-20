@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
@@ -1030,3 +1030,280 @@ class SeededSystemTemplateTests(TestCase):
             for bad in singular_verbs:
                 with self.subTest(name=tpl.template_name, phrase=bad):
                     self.assertNotIn(bad, letter)
+
+
+class LetterContextTests(TestCase):
+    """build_letter_context assembles everything the Jinja templates read."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof B", unique_id="T-B", email="b@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Ramesh Shrestha", roll_number="080BCT042", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Ramesh Shrestha", std=self.student, professor=self.teacher,
+            subjects="Data Structures,Algorithms",
+        )
+
+    def test_pronouns_follow_the_student_gender(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "He")
+        self.assertEqual(ctx["pronoun_obj"], "him")
+        self.assertEqual(ctx["pronoun_pos"], "His")
+
+    def test_female_gender_maps_correctly(self):
+        from home.letters import build_letter_context
+        self.student.gender = "Female"
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "She")
+        self.assertEqual(ctx["pronoun_obj"], "her")
+        self.assertEqual(ctx["pronoun_pos"], "Her")
+
+    def test_unknown_gender_falls_back_to_they(self):
+        from home.letters import build_letter_context
+        self.student.gender = ""
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "They")
+        self.assertEqual(ctx["pronoun_obj"], "them")
+        self.assertEqual(ctx["pronoun_pos"], "Their")
+
+    def test_null_gender_falls_back_to_they(self):
+        from home.letters import build_letter_context
+        self.student.gender = None
+        self.student.save()
+        self.assertEqual(build_letter_context(self.application)["pronoun"], "They")
+
+    def test_gender_matching_is_case_insensitive(self):
+        from home.letters import build_letter_context
+        self.student.gender = "MALE"
+        self.student.save()
+        self.assertEqual(build_letter_context(self.application)["pronoun"], "He")
+
+    def test_no_context_value_is_none_for_the_pronoun_words(self):
+        # Jinja's ``|lower`` filter raises on an explicit None, and every
+        # seeded template pipes these through it.
+        from home.letters import build_letter_context
+        self.student.gender = None
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        for key in ("pronoun", "pronoun_obj", "pronoun_pos", "rel_desc", "strength_phrase"):
+            with self.subTest(key=key):
+                self.assertIsInstance(ctx[key], str)
+
+    def test_subjects_are_split_into_list_and_last(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["subjects"], ["Data Structures"])
+        self.assertEqual(ctx["subject"], "Algorithms")
+
+    def test_single_subject_sets_value_true(self):
+        from home.letters import build_letter_context
+        self.application.subjects = "Algorithms"
+        self.application.save()
+        ctx = build_letter_context(self.application)
+        self.assertTrue(ctx["value"])
+
+    def test_empty_subjects_do_not_crash(self):
+        from home.letters import build_letter_context
+        self.application.subjects = ""
+        self.application.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["subjects"], [])
+        self.assertFalse(ctx["value"])
+
+    def test_firstname_is_the_first_word(self):
+        from home.letters import build_letter_context
+        self.assertEqual(build_letter_context(self.application)["firstname"], "Ramesh")
+
+    def test_missing_satellite_rows_do_not_raise(self):
+        # No Paper/Project/University/Qualities/Academics/Files rows exist.
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        for key in ("paper", "project", "university", "quality", "academics", "files"):
+            with self.subTest(key=key):
+                self.assertIsNone(ctx[key])
+        self.assertEqual(ctx["deadline"], "")
+
+    def test_satellite_rows_are_returned_when_present(self):
+        from home.letters import build_letter_context
+        academics = Academics.objects.create(application=self.application, gpa="3.9")
+        university = University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+        )
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["academics"], academics)
+        self.assertEqual(ctx["university"], university)
+
+    def test_deadline_is_formatted_when_present(self):
+        from home.letters import build_letter_context
+        University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+            uni_deadline=date(2026, 12, 15),
+        )
+        self.assertEqual(build_letter_context(self.application)["deadline"], "December 15, 2026")
+
+    def test_teacher_and_app_aliases_are_present(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["teacher"], self.teacher)
+        self.assertEqual(ctx["app"], self.application)
+        self.assertEqual(ctx["student"], self.application)
+        self.assertTrue(ctx["today"])
+
+    def test_every_seeded_system_template_renders_against_this_context(self):
+        # The real integration check: the three shipped templates must render
+        # against exactly what this function produces.
+        from jinja2 import Template
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertIn("Ramesh Shrestha", letter)
+                self.assertNotIn("None", letter)
+
+    def test_rel_desc_comes_from_the_application(self):
+        from home.letters import build_letter_context
+        self.application.relationship_type = "project supervisor"
+        self.application.save()
+        self.assertEqual(build_letter_context(self.application)["rel_desc"], "project supervisor")
+
+    def test_rel_desc_falls_back_when_unset(self):
+        from home.letters import build_letter_context
+        for value in (None, "", "   "):
+            with self.subTest(value=value):
+                self.application.relationship_type = value
+                self.application.save()
+                self.assertEqual(build_letter_context(self.application)["rel_desc"], "teacher")
+
+    def test_strength_phrase_follows_the_recommendation_strength(self):
+        from home.letters import build_letter_context
+        quality = Qualities.objects.create(application=self.application)
+        expected = {
+            "top5": "as one of the very best students I have taught",
+            "top10": "as one of the strongest students I have taught",
+            "outstanding": "in the strongest possible terms",
+            "strong": "with great enthusiasm",
+        }
+        for value, phrase in expected.items():
+            with self.subTest(value=value):
+                quality.recommendation_strength = value
+                quality.save()
+                self.assertEqual(build_letter_context(self.application)["strength_phrase"], phrase)
+
+    def test_strength_phrase_falls_back_without_a_qualities_row(self):
+        from home.letters import build_letter_context
+        self.assertEqual(
+            build_letter_context(self.application)["strength_phrase"],
+            "with great enthusiasm",
+        )
+
+    def test_strength_phrase_falls_back_on_an_unrecognised_value(self):
+        from home.letters import build_letter_context
+        Qualities.objects.create(application=self.application, recommendation_strength="")
+        self.assertEqual(
+            build_letter_context(self.application)["strength_phrase"],
+            "with great enthusiasm",
+        )
+
+    def test_recommendation_reads_correctly_for_every_strength(self):
+        """Each phrase must slot grammatically into every seeded template."""
+        from jinja2 import Template
+        from home.letters import build_letter_context
+        quality = Qualities.objects.create(application=self.application)
+        for value in ("top5", "top10", "outstanding", "strong"):
+            quality.recommendation_strength = value
+            quality.save()
+            ctx = build_letter_context(self.application)
+            for tpl in CustomTemplates.objects.filter(is_system=True):
+                with self.subTest(strength=value, name=tpl.template_name):
+                    letter = Template(tpl.template).render(ctx)
+                    self.assertNotIn("and without reservation", letter)
+                    self.assertNotIn("  ", letter)
+                    # A trailing prepositional phrase must not attach itself
+                    # to the end of a ranked strength phrase.
+                    self.assertNotIn("I have taught for", letter)
+
+    def _subjects(self, raw):
+        from home.letters import build_letter_context
+        self.application.subjects = raw
+        self.application.save()
+        return build_letter_context(self.application)
+
+    def test_subject_keys_agree_on_empty_segments(self):
+        # subjects/subject/value were derived separately in the legacy views
+        # and disagreed; one normalisation now backs all three.
+        cases = {
+            "A,B,C": (["A", "B"], "C", False),
+            "A": ([], "A", True),
+            "A,": ([], "A", True),       # trailing comma must not blank the subject
+            ",A": ([], "A", True),
+            "A, B": (["A"], "B", False),  # inner whitespace is stripped
+            "": ([], "", False),
+            None: ([], "", False),
+        }
+        for raw, (subjects, subject, value) in cases.items():
+            with self.subTest(raw=raw):
+                ctx = self._subjects(raw)
+                self.assertEqual(ctx["subjects"], subjects)
+                self.assertEqual(ctx["subject"], subject)
+                self.assertEqual(ctx["value"], value)
+
+    def test_a_trailing_comma_does_not_drop_the_only_subject(self):
+        # Legacy gave value=True with subject="", rendering "I taught him .".
+        ctx = self._subjects("Algorithms,")
+        self.assertTrue(ctx["value"])
+        self.assertEqual(ctx["subject"], "Algorithms")
+
+    def test_subjects_sentence_reads_as_prose(self):
+        for raw, expected in (
+            ("", ""),
+            ("Algorithms", "Algorithms"),
+            ("Algorithms,Compilers", "Algorithms and Compilers"),
+            ("Algorithms,Compilers,Networks", "Algorithms, Compilers and Networks"),
+            ("Algorithms, Compilers , Networks", "Algorithms, Compilers and Networks"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(self._subjects(raw)["subjects_sentence"], expected)
+
+    def test_firstname_handles_awkward_whitespace(self):
+        from home.letters import build_letter_context
+        for raw, expected in (
+            ("  Ram Thapa", "Ram"),      # leading space returned "" before
+            ("Ram  Thapa", "Ram"),
+            ("Sita", "Sita"),
+            ("", ""),
+            (None, ""),
+        ):
+            with self.subTest(raw=raw):
+                self.application.name = raw
+                self.application.save()
+                self.assertEqual(build_letter_context(self.application)["firstname"], expected)
+
+    def test_seeded_templates_list_subjects_as_prose(self):
+        from jinja2 import Template
+        ctx = self._subjects("Algorithms,Compilers,Networks")
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertNotIn("Algorithms,Compilers", letter)
+                if "Algorithms" in letter:
+                    self.assertIn("Algorithms, Compilers and Networks", letter)
+
+    def test_seeded_templates_omit_the_subject_clause_when_unset(self):
+        from jinja2 import Template
+        ctx = self._subjects("")
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertNotIn("having taught", letter)
+                self.assertNotIn("I taught", letter)
+                self.assertNotIn(" in .", letter)

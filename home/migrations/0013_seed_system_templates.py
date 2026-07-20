@@ -8,7 +8,7 @@ Re: Letter of Recommendation for {{ app.name }}
 
 It is my pleasure to recommend {{ app.name }}{% if app.std.program.program_name %}, a student of the {{ app.std.program.program_name }} program{% endif %}{% if app.std.department.dept_name %} in the Department of {{ app.std.department.dept_name }}{% endif %} at the Institute of Engineering, Pulchowk Campus, Tribhuvan University.
 
-I have known {{ app.name }} as {{ pronoun_pos|lower }} {{ rel_desc }}{% if app.subjects %}, having taught {{ pronoun_obj|lower }} in {{ app.subjects }}{% endif %}.
+I have known {{ app.name }} as {{ pronoun_pos|lower }} {{ rel_desc }}{% if subjects_sentence %}, having taught {{ pronoun_obj|lower }} in {{ subjects_sentence }}{% endif %}.
 {%- if academics and academics.gpa %}
 
 {{ pronoun_pos }} cumulative GPA is {{ academics.gpa }}{% if app.ranking_percentile %}, placing {{ pronoun_obj|lower }} within the top {{ app.ranking_percentile }} percent of the cohort{% endif %}.
@@ -22,7 +22,7 @@ Above all, I regard {{ pronoun_obj|lower }} as {{ quality.quality }}.
 {{ app.prof_anecdote }}
 {%- endif %}
 
-I recommend {{ pronoun_obj|lower }} {{ strength_phrase }} and without reservation.
+I recommend {{ pronoun_obj|lower }} {{ strength_phrase }}.
 
 Sincerely,
 {{ teacher.name or '' }}
@@ -59,7 +59,7 @@ Academically, {{ pronoun_pos|lower }} GPA stands at {{ academics.gpa }}{% if aca
 I understand the application deadline is {{ deadline }}.
 {%- endif %}
 
-I recommend {{ pronoun_obj|lower }} {{ strength_phrase }} for admission.
+I recommend {{ pronoun_obj|lower }} for admission {{ strength_phrase }}.
 
 Sincerely,
 {{ teacher.name or '' }}
@@ -71,9 +71,9 @@ GENERAL = """{{ today }}
 To Whom It May Concern
 
 I am glad to recommend {{ app.name }}, whom I have known as {{ pronoun_pos|lower }} {{ rel_desc }} at the Institute of Engineering, Pulchowk Campus, Tribhuvan University.
-{%- if app.subjects %}
+{%- if subjects_sentence %}
 
-I taught {{ pronoun_obj|lower }} in {{ app.subjects }}.
+I taught {{ pronoun_obj|lower }} in {{ subjects_sentence }}.
 {%- endif %}
 {%- if academics and academics.gpa %}
 
