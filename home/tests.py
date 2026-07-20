@@ -745,6 +745,38 @@ class TeacherDashboardViewTests(TestCase):
         self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
         self.assertNotIn("BEX", response.context["filter_options"]["departments"])
 
+    def test_teacher_view_redirects_when_cookie_is_missing(self):
+        del self.client.cookies["unique"]
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_teacher_view_redirects_when_cookie_is_stale(self):
+        # A professor whose TeacherInfo was removed, or a hand-edited cookie.
+        self.client.cookies["unique"] = "T000-does-not-exist"
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_redownload_link_shown_only_when_a_letter_is_stored(self):
+        from django.core.files.base import ContentFile
+
+        stored = Application.objects.create(
+            name="dan stored", email="d@example.com", professor=self.prof,
+            std=self.usa_app.std, is_generated=True,
+        )
+        response = self.client.get("/teacher")
+        self.assertNotContains(response, f"/download_generated/?id={stored.pk}")
+
+        stored.generated_letter.save(
+            "dan.pdf", ContentFile(b"%PDF-1.4 x"), save=True,
+        )
+        try:
+            response = self.client.get("/teacher")
+            self.assertContains(response, f"/download_generated/?id={stored.pk}")
+        finally:
+            stored.generated_letter.delete(save=False)
+
 
 class DownloadGeneratedTests(TestCase):
     def setUp(self):

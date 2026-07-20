@@ -36,7 +36,6 @@ def build_teacher_dashboard_context(unique_id, params):
         "all_students": generated,
         "student_list": pending,
         "check_value": not pending.exists(),
-        "teacher_number": scoped.count(),
         "std_dataharu": serializers.serialize("json", generated),
         "teacher_model": teacher_model,
         "default_template": teacher_model.customtemplates_set.filter(

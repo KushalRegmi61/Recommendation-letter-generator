@@ -1547,6 +1547,11 @@ def testing(request):
 
 def teacher(request):
     unique = request.COOKIES.get("unique")
+    # Identity comes from a client-controlled cookie, so an absent or stale
+    # value is an ordinary logged-out visitor, not an error. Every other
+    # Teacher.html entry point already checks this before building context.
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
     context = build_teacher_dashboard_context(unique, request.GET)
     return render(request, "Teacher.html", context)
 
