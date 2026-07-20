@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a professor filter their incoming *and* already-generated applications by Department / Country / College, see when each letter was generated, and re-download a previously generated letter.
+**Goal:** Let a professor filter their incoming *and* already-generated applications by Department / Country / College, search them by student name / roll number / email, see when each letter was generated, and re-download a previously generated letter.
 
 **Architecture:** Two new small modules keep logic out of the 2300-line `views.py`. `home/filters.py` owns the queryset filtering + dropdown-option derivation (pure, easily unit-tested against the ORM). `home/dashboard.py` owns a single `build_teacher_dashboard_context()` that both `teacher()` and `loginTeacher()` call — removing the duplicated context block and fixing a latent `Application.objects.get()` crash in `loginTeacher`. `Teacher.html` gains a GET filter bar and a richer generated-letters table. A new `download_generated` view serves the stored `Application.generated_letter` file, degrading gracefully for legacy rows that have none.
 
@@ -37,7 +37,7 @@ Read these before starting:
 
 | File | Status | Responsibility |
 |---|---|---|
-| `home/filters.py` | **Create** | Pure filtering logic: apply GET filter params to an `Application` queryset; derive dropdown options from a queryset. No HTTP, no cookies. |
+| `home/filters.py` | **Create** | Pure filtering logic: apply GET filter params (dropdowns + free-text search) to an `Application` queryset; derive dropdown options from a queryset. No HTTP, no cookies. |
 | `home/dashboard.py` | **Create** | Build the full `Teacher.html` render context (pending list, generated list, filter options, counters) from a `unique_id` + filter params. No HTTP response building. |
 | `home/views.py` | Modify | `teacher()` (~line 1717) and `loginTeacher()` GET branch (~line 953) delegate to `build_teacher_dashboard_context`. Add new `download_generated()` view. |
 | `home/urls.py` | Modify | Add `path('download_generated/', views.download_generated, name='download_generated')`. |
@@ -374,6 +374,143 @@ git commit -m "feat(filters): derive filter dropdown options from a professor's 
 
 ---
 
+## Task 3b: Free-text search across student name, roll number and email
+
+The dropdowns answer "which country / college"; they do not help a professor find one
+named student among forty pending requests. A single search box that matches name, roll
+number, or email covers that without making the professor choose a field first.
+
+Deliberately **not** searched: university name and country — the dropdowns already handle
+those, and folding them into the text box produces confusing cross-matches.
+
+**Files:**
+- Modify: `home/filters.py`
+- Test: `home/tests.py` (extend `ApplicationFilterTests`)
+
+- [ ] **Step 1: Write the failing test**
+
+Add these methods to `ApplicationFilterTests`. They rely on the `setUp` from Task 1
+(`alice` / `080BCT001` / `a@example.com` and `bob` / `080BCE002` / `b@example.com`):
+
+```python
+    def test_search_matches_application_name(self):
+        result = apply_application_filters(self.base_qs(), {"q": "alice"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_is_case_insensitive_and_partial(self):
+        result = apply_application_filters(self.base_qs(), {"q": "AL"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_matches_roll_number(self):
+        result = apply_application_filters(self.base_qs(), {"q": "080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_email(self):
+        result = apply_application_filters(self.base_qs(), {"q": "b@example.com"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_first_or_last_name_fields(self):
+        self.app_bce.first_name = "Bobby"
+        self.app_bce.last_name = "Tables"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "tables"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_blank_search_is_ignored(self):
+        result = apply_application_filters(self.base_qs(), {"q": "   "})
+        self.assertEqual(result.count(), 2)
+
+    def test_search_combines_with_dropdown_filters(self):
+        # alice matches the text, but her university is in the USA, not Finland.
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "Netherlands"}
+        )
+        self.assertEqual(result.count(), 0)
+
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "USA"}
+        )
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_does_not_match_university_name(self):
+        # University search is the dropdowns' job; matching it here would
+        # surprise a professor searching for a person.
+        result = apply_application_filters(self.base_qs(), {"q": "MIT"})
+        self.assertEqual(result.count(), 0)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `python manage.py test home.tests.ApplicationFilterTests -v 2`
+
+Expected: FAIL — the search tests return 2 rows instead of 1, because `q` is ignored.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `home/filters.py`, add the import at the top of the file:
+
+```python
+from django.db.models import Q
+```
+
+Extend `FILTER_PARAMS` and the search-relevant constant:
+
+```python
+#: GET parameter names the dashboard understands.
+FILTER_PARAMS = ("department", "country", "college", "q")
+
+#: Fields the free-text box searches. Student identity only — university
+#: name/country are covered by the dropdowns.
+SEARCH_FIELDS = (
+    "name",
+    "first_name",
+    "last_name",
+    "email",
+    "std__roll_number",
+    "std__username",
+)
+```
+
+Then add the search clause inside `apply_application_filters`, immediately after the
+`college` filter and **before** the `distinct()` block:
+
+```python
+    search = (params.get("q") or "").strip()
+    if search:
+        matches = Q()
+        for field in SEARCH_FIELDS:
+            matches |= Q(**{f"{field}__icontains": search})
+        queryset = queryset.filter(matches)
+```
+
+And update the `distinct()` condition so a search joined with a to-many filter still
+de-duplicates:
+
+```python
+    if country or college:
+        # ``university`` is a to-many join: without distinct() an application
+        # with two matching universities would appear twice.
+        queryset = queryset.distinct()
+```
+
+(That condition is unchanged — `SEARCH_FIELDS` contains no to-many joins, so search alone
+cannot duplicate rows. Leave it as-is; this step is a check, not an edit.)
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `python manage.py test home.tests.ApplicationFilterTests -v 2`
+
+Expected: PASS (15 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add home/filters.py home/tests.py
+git commit -m "feat(filters): add free-text search over student name, roll number and email"
+```
+
+---
+
 ## Task 4: Shared dashboard context builder
 
 `teacher()` and `loginTeacher()` currently build the same `Teacher.html` context twice. `loginTeacher` does it with `Application.objects.get(professor__unique_id=unique, is_generated=True)` — a **bug**: `.get()` raises `DoesNotExist` when the professor has generated nothing and `MultipleObjectsReturned` once they have generated two letters. Extracting one builder fixes it and gives filtering a single home.
@@ -450,6 +587,13 @@ class DashboardContextTests(TestCase):
     def test_no_filters_means_filters_inactive(self):
         ctx = build_teacher_dashboard_context("T300", {})
         self.assertFalse(ctx["filters_active"])
+
+    def test_search_narrows_both_lists_and_counts_as_active(self):
+        ctx = build_teacher_dashboard_context("T300", {"q": "newer"})
+        self.assertEqual([a.pk for a in ctx["all_students"]], [self.newer.pk])
+        self.assertEqual(list(ctx["student_list"]), [])
+        self.assertEqual(ctx["active_filters"]["q"], "newer")
+        self.assertTrue(ctx["filters_active"])
 
     def test_teacher_with_no_generated_letters_does_not_crash(self):
         Application.objects.filter(is_generated=True).delete()
@@ -697,6 +841,13 @@ Add these methods to `TeacherDashboardViewTests`:
         response = self.client.get("/teacher", {"country": "USA"})
         self.assertContains(response, '<option value="USA" selected>')
 
+    def test_search_box_is_rendered_and_keeps_its_value(self):
+        response = self.client.get("/teacher", {"q": "dan usa"})
+        self.assertContains(response, 'name="q"')
+        self.assertContains(response, 'value="dan usa"')
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
     def test_generated_table_has_tracking_columns(self):
         response = self.client.get("/teacher")
         self.assertContains(response, "Generated on")
@@ -715,6 +866,12 @@ Expected: FAIL — the three new tests fail because `Teacher.html` contains no f
 
 ```html
   <form method="get" action="/teacher" class="row g-2 align-items-end mb-4">
+    <div class="col-auto">
+      <label for="filter-q" class="form-label">Search student</label>
+      <input class="form-control" id="filter-q" type="search" name="q"
+             placeholder="Name, roll number or email"
+             value="{{ active_filters.q }}">
+    </div>
     <div class="col-auto">
       <label for="filter-department" class="form-label">Department</label>
       <select class="form-select" id="filter-department" name="department">
@@ -784,13 +941,13 @@ The em-dash fallbacks matter: every existing row has `generated_at=NULL` until P
 
 Run: `python manage.py test home.tests.TeacherDashboardViewTests -v 2`
 
-Expected: PASS (8 tests).
+Expected: PASS (9 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add templates/Teacher.html home/tests.py
-git commit -m "feat(teacher): add filter bar and generated-letter tracking columns"
+git commit -m "feat(teacher): add search box, filter bar and letter tracking columns"
 ```
 
 ---
@@ -978,7 +1135,9 @@ In `README.md`, under **Using the app → Teacher / Professor**, replace step 2 
 ```markdown
 2. **Log in** and view incoming requests and the students you have already recommended.
    Use the **filter bar** (Department / Country / College) to narrow both lists — for
-   example, "everyone I have recommended who applied to a university in the USA".
+   example, "everyone I have recommended who applied to a university in the USA" — and
+   the **search box** to find one student by name, roll number, or email. Search and
+   filters combine.
    The recommended-students table shows when each letter was generated, which template
    produced it, and a **Re-download** link for letters whose file was stored.
 ```
@@ -994,7 +1153,8 @@ git commit -m "docs: document professor filtering and generated-letter tracking"
 
 ## Definition of done
 
-- A professor sees Department / Country / College dropdowns populated only from their own applications.
+- A professor sees Department / Country / College dropdowns populated only from their own applications, plus a search box.
+- Searching by student name, roll number, or email narrows both lists; search ANDs with the dropdowns.
 - Selecting filters narrows **both** the pending-requests list and the recommended-students table; filters AND together; "Clear" resets.
 - The recommended-students table sorts newest-generated first and shows generation time + template, with `—` where Phase 3 has not yet stamped them.
 - Re-download serves the stored file, 404s across professors, and redirects with a message when no file was stored.
