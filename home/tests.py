@@ -2,7 +2,7 @@ import os
 import tempfile
 from datetime import date, datetime
 
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
@@ -3048,3 +3048,72 @@ class StudentCookieSigningTests(TestCase):
         self.client.post("/loginStudent", {"username": "Real Student", "pass": "pw"})
         raw = self.client.cookies["student"].value
         self.assertEqual(current_student(self._request({"student": raw})), self.student)
+
+
+class AdminAuthorizationTests(TestCase):
+    """The admin dashboard is superuser-only."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+
+    def test_anonymous_cannot_reach_the_dashboard(self):
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_anonymous_cannot_create_a_teacher(self):
+        before = TeacherInfo.objects.count()
+        self.client.post("/adminDashboard", {
+            "name": "Injected Prof", "email": "inj@example.com",
+            "department": self.dept.pk,
+        })
+        self.assertEqual(TeacherInfo.objects.count(), before)
+
+    def test_a_plain_user_cannot_reach_the_dashboard(self):
+        self.client.force_login(User.objects.create_user(username="plain", password="pw"))
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_a_logged_in_professor_cannot_reach_the_dashboard(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof AD", unique_id="T-AD", email="ad@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, teacher)
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_a_superuser_can_reach_the_dashboard(self):
+        admin = User.objects.create_superuser(
+            username="root", password="pw", email="root@example.com"
+        )
+        self.client.force_login(admin)
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 200)
+
+
+class StudentPasswordChangeAuthTests(TestCase):
+    """The student password page authenticates students, not teachers."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Pw Student", roll_number="080BCT970", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+
+    def test_anonymous_is_redirected(self):
+        self.assertEqual(self.client.get("/studentPasswordChange").status_code, 302)
+
+    def test_a_logged_in_teacher_is_not_treated_as_a_student(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof PW", unique_id="T-PW", email="pw@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, teacher)
+        self.assertEqual(self.client.get("/studentPasswordChange").status_code, 302)
+
+    def test_a_signed_in_student_can_change_their_password(self):
+        login_as_student(self.client, self.student)
+        self.client.post("/studentPasswordChange", {
+            "old_password": "pw", "new_password": "new-pw",
+            "confirm_password": "new-pw",
+        })
+        self.student.refresh_from_db()
+        self.assertTrue(check_password("new-pw", self.student.password))

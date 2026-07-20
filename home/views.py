@@ -3,7 +3,7 @@ import os
 from django.db import transaction
 from django.db.models.fields import DateTimeField
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.sessions.models import Session
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -1255,18 +1255,20 @@ def userPasswordChange(request):
             messages.error(request, "Old Password didnt match")
             return redirect(userDetails)
 
-# to change the password of the corresponding student within website
-@login_required(login_url="/loginStudent")
+# to change the password of the corresponding student within website.
+# Not @login_required: that checks the teacher/admin session, which a student
+# never has. Identity comes from the signed student cookie instead.
 def studentPasswordChange(request):
+    student = current_student(request)
+    if student is None:
+        return redirect("/loginStudent")
+
     if request.method == "POST":
         typed_password = request.POST.get("old_password")
         new_password = request.POST.get("new_password")
         confirm_password = request.POST.get("confirm_password")
 
         # to obtain old password,
-        student = current_student(request)
-        if student is None:
-            return redirect("/loginStudent")
         current_password = student.password
 
         # confirming typed old password is true or not
@@ -1676,6 +1678,7 @@ def generate_unique_id():
     return str(random.randint(10000, 99999))
 
 
+@user_passes_test(lambda u: u.is_authenticated and u.is_superuser, login_url="/loginAdmin")
 def adminDashboard(request):
     if request.method == 'POST':
         form = TeacherInfoForm(request.POST, request.FILES)
