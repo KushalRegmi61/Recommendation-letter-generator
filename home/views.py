@@ -1224,11 +1224,11 @@ def studentDetails(request):
             {"username": student.username,'roll':student.roll_number, 'department': student.department,'program': student.program,'gender': student.gender,
             'dob': student.dob},
         )
-    else:
-        return render(
-            request,
-            "studentDetails.html")
-    
+    # No identity: send them to log in rather than rendering an empty profile.
+    # A student whose browser still holds a pre-Phase-4b unsigned cookie lands here.
+    return redirect("/loginStudent")
+
+
 def profileUpdate(request):
     teacherkonam = current_teacher(request)
     if teacherkonam is None:

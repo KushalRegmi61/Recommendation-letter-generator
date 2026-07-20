@@ -14,7 +14,7 @@
 
 | line | setting | value |
 |---|---|---|
-| 24 | `SECRET_KEY` | `'django-insecure-1c(@@0$o-xebj!h&9#lp=70m_9)=axidw!o^%e1w^k*1x7xcwi'` — committed |
+| 24 | `SECRET_KEY` | a hardcoded `django-insecure-...` literal, committed (value redacted here — it is in git history and must be rotated) |
 | 27 | `DEBUG` | `True` |
 | 30 | `ALLOWED_HOSTS` | `['*', 'recommendation-generator.bct.itclub.pp.ua']` |
 | 64 | `CsrfViewMiddleware` | **commented out** |

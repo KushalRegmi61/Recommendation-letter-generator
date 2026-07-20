@@ -3740,3 +3740,32 @@ class CsrfProtectionTests(TestCase):
         enforcing = Client(enforce_csrf_checks=True)
         response = enforcing.post("/loginAdmin", {"username": "x", "password": "y"})
         self.assertEqual(response.status_code, 403)
+
+
+class StaleStudentCookieTests(TestCase):
+    """A pre-signing cookie must send the student to log in, not a blank page."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Stale Student", roll_number="080BCT990", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+
+    def test_an_unsigned_legacy_cookie_redirects_to_login(self):
+        # This is exactly what a browser holds after the signing change shipped.
+        self.client.cookies["student"] = "Stale Student"
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginStudent", response["Location"])
+
+    def test_no_cookie_redirects_to_login(self):
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_signed_cookie_still_reaches_the_profile(self):
+        login_as_student(self.client, self.student)
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "080BCT990")
