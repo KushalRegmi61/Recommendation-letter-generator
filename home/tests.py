@@ -3315,3 +3315,37 @@ class ProfessorApprovalTests(TestCase):
         })
         created = User.objects.get(email="am@example.com")
         self.assertTrue(created.is_active)
+
+
+class AddSubjectsTests(TestCase):
+    """A professor can add a subject to their profile."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof AS", unique_id="T-AS", email="as@example.com",
+            department=self.dept,
+        )
+        self.subject = Subject.objects.create(sub_name="Operating Systems")
+        login_as_teacher(self.client, self.teacher)
+
+    def test_a_subject_can_be_added(self):
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertIn(self.subject, self.teacher.subjects.all())
+
+    def test_an_unknown_subject_does_not_crash(self):
+        response = self.client.post("/addSubjects", {"subject": "No Such Subject"})
+        self.assertIn(response.status_code, (200, 302))
+
+    def test_an_anonymous_request_cannot_add_a_subject(self):
+        self.client.logout()
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertNotIn(self.subject, self.teacher.subjects.all())
+
+    def test_a_subject_can_be_removed_again(self):
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.client.post("/deleteSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertNotIn(self.subject, self.teacher.subjects.all())

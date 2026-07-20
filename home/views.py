@@ -1358,13 +1358,20 @@ def addSubjects(request):
         # Identity comes from the session, not from a client-set cookie.
         teacher = current_teacher(request)
         if teacher is not None:
-            naya_subject=Subject.objects.get(name=subject)
+            # The field is ``sub_name``; ``name`` raised a FieldError (500) on
+            # every call. An unrecognised name is an ordinary user error, not
+            # a crash, so DoesNotExist is reported rather than propagated.
+            try:
+                naya_subject=Subject.objects.get(sub_name=subject)
+            except Subject.DoesNotExist:
+                messages.error(request, "No such Subject exists. ")
+                return redirect(userDetails)
             # to check if subject is in teacher model or not
             check=[]
             subjects=teacher.subjects.all()
             for i in subjects:
-                check.append(i.name)
-            
+                check.append(i.sub_name)
+
             if subject in check:
                 messages.error(request, "Subject already exists.")
                 return redirect(userDetails)
