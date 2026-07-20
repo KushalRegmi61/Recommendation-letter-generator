@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from django.contrib.auth.models import User
 from django.test import TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
@@ -638,3 +639,30 @@ class TeacherDashboardViewTests(TestCase):
         Application.objects.filter(professor=self.prof).update(is_generated=True)
         response = self.client.get("/loginTeacher")
         self.assertEqual(response.status_code, 200)
+
+    def test_all_teacher_dashboard_entry_points_supply_filter_options(self):
+        # Teacher.html is rendered from several views; every one of them must
+        # provide the filter context or the filter bar renders empty.
+        for path in ("/", "/loginStudent", "/registerStudent"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.context["filter_options"]["countries"],
+                    ["Finland", "USA"],
+                )
+                self.assertEqual(response.context["generated_count"], 0)
+
+    def test_login_teacher_post_supplies_filter_options(self):
+        user = User.objects.create_user(
+            username="prof4", email="p4@example.com", password="secret",
+        )
+        user.first_name = "Prof Four/T400"
+        user.save()
+        response = self.client.post(
+            "/loginTeacher", {"username": "p4@example.com", "password": "secret"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["filter_options"]["countries"], ["Finland", "USA"]
+        )

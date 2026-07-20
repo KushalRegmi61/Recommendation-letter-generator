@@ -89,46 +89,12 @@ def index(request):
         uid = request.COOKIES.get('unique')            
         print("teacher " + str(uid))                         #if not student then might be teacher
         if TeacherInfo.objects.filter(unique_id__exact=uid).exists():
-                value = 0
                 unique = request.COOKIES.get('unique')                              #teacher's unique id (see schema diagram)
 
 
                 # generate teachers home page
-                teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                generated_dataharu = Application.objects.filter(professor__unique_id=unique , is_generated=True)
-
-                dataharu = Application.objects.filter(professor__unique_id=unique)
-                number = len(dataharu)
-                # check if there is request or not on teachers page
-                for data in dataharu:
-                    if data.is_generated:
-                        value += 1
-                datakolength = len(dataharu)
-                if datakolength == value:
-                    check_value = True
-                else:
-                    check_value = False
-                    # to convert database to json objects
-                std_dataharu = serializers.serialize(
-                    "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-                )
-                non_generated = Application.objects.filter(
-                    is_generated=False, professor__unique_id=unique
-                )
-
-                response = render(
-                    request,
-                    "Teacher.html",
-                    {
-                        "all_students": generated_dataharu,
-                        "student_list": non_generated,
-                        "check_value": check_value,
-                        "teacher_number": number,
-                        "std_dataharu": std_dataharu,
-                        "teacher_model": teacher_model,
-                    },
-                )
-                return response
+                context = build_teacher_dashboard_context(unique, request.GET)
+                return render(request, "Teacher.html", context)
         
     # if the request is not a GET request or user is not logged in , render index page
     return render(request, "index.html")
@@ -287,43 +253,9 @@ def registerStudent(request):
         #     return response
         unique = request.COOKIES.get('unique')
         if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-                value = 0
 
-                teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                generated_dataharu = Application.objects.filter(professor__unique_id=unique , is_generated=True)
-
-                dataharu = Application.objects.filter(professor__unique_id=unique)
-                number = len(dataharu)
-                # to check if there is request or not on teachers page
-                for data in dataharu:
-                    if data.is_generated:
-                        value += 1
-                datakolength = len(dataharu)
-                if datakolength == value:
-                    check_value = True
-                else:
-                    check_value = False
-                    # to convert database to json objects
-                std_dataharu = serializers.serialize(
-                    "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-                )
-                non_generated = Application.objects.filter(
-                    is_generated=False, professor__unique_id=unique
-                )
-
-                response = render(
-                    request,
-                    "Teacher.html",
-                    {
-                        "all_students": generated_dataharu,
-                        "student_list": non_generated,
-                        "check_value": check_value,
-                        "teacher_number": number,
-                        "std_dataharu": std_dataharu,
-                        "teacher_model": teacher_model,
-                    },
-                )
-                return response
+                context = build_teacher_dashboard_context(unique, request.GET)
+                return render(request, "Teacher.html", context)
         
     if request.method == "POST":
         usern = request.POST.get("name")
@@ -384,43 +316,9 @@ def loginStudent(request):
             return response
         unique = request.COOKIES.get('unique')
         if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-                value = 0
 
-                teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                generated_dataharu = Application.objects.filter(professor__unique_id=unique , is_generated=True)
-
-                dataharu = Application.objects.filter(professor__unique_id=unique)
-                number = len(dataharu)
-                # to check if there is request or not on teachers page
-                for data in dataharu:
-                    if data.is_generated:
-                        value += 1
-                datakolength = len(dataharu)
-                if datakolength == value:
-                    check_value = True
-                else:
-                    check_value = False
-                    # to convert database to json objects
-                std_dataharu = serializers.serialize(
-                    "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-                )
-                non_generated = Application.objects.filter(
-                    is_generated=False, professor__unique_id=unique
-                )
-
-                response = render(
-                    request,
-                    "Teacher.html",
-                    {
-                        "all_students": generated_dataharu,
-                        "student_list": non_generated,
-                        "check_value": check_value,
-                        "teacher_number": number,
-                        "std_dataharu": std_dataharu,
-                        "teacher_model": teacher_model,
-                    },
-                )
-                return response
+                context = build_teacher_dashboard_context(unique, request.GET)
+                return render(request, "Teacher.html", context)
     
     # post request from loginStudent.html
     if request.method == "POST":
@@ -981,7 +879,6 @@ def loginTeacher(request):
                 return render(request, "Teacher.html", context)
         return render(request, "loginTeacher.html")
             
-    value = 0
     if request.method == "POST":
         email = request.POST.get("username")   
         passwo = request.POST.get("password")
@@ -1012,38 +909,8 @@ def loginTeacher(request):
                     messages.error(request, f"No teacher found for ID: {unique}")
                     return render(request, "loginTeacher.html")  
 
-                generated_dataharu = Application.objects.filter(professor__unique_id=unique , is_generated=True)
-                dataharu = Application.objects.filter(professor__unique_id=unique)
-                number = len(dataharu)
-                for data in dataharu:
-                    if data.is_generated:
-                        value += 1
-                datakolength = len(dataharu)
-                if datakolength == value:
-                    check_value = True
-                else:
-                    check_value = False
-                std_dataharu = serializers.serialize(
-                    "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-                )
-                non_generated = Application.objects.filter(
-                    is_generated=False, professor__unique_id=unique
-                )
-                # compute default custom template for this teacher
-                default_template = teacher_model.customtemplates_set.filter(is_default=True).first()
-                response = render(
-                    request,
-                    "Teacher.html",
-                    {
-                        "all_students": generated_dataharu,
-                        "student_list": non_generated,
-                        "check_value": check_value,
-                        "teacher_number": number,
-                        "std_dataharu": std_dataharu,
-                        "teacher_model": teacher_model,
-                        "default_template": default_template,
-                    },
-                )
+                context = build_teacher_dashboard_context(unique, request.GET)
+                response = render(request, "Teacher.html", context)
                 response.set_cookie("unique", unique)
                 response.set_cookie("username", user.username)
                 return response
