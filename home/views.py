@@ -18,7 +18,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from .forms import TeacherInfoForm
-from home.identity import current_teacher
+from home.identity import current_teacher, current_student, set_student_cookie
 from django.contrib import messages
 import random
 import uuid
@@ -58,10 +58,9 @@ def index(request):
     
     #check if the user is logged in or not
     if request.method == "GET":                                                     #if logged in 
-        naam = request.COOKIES.get('student')      
-        
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -230,9 +229,9 @@ def registerStudent(request):
     context_dict = { "departments": departments , "programs": programs}
     
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -307,9 +306,9 @@ def loginStudent(request):
 
     #handles just after student is logged in
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -362,7 +361,7 @@ def loginStudent(request):
                         },
                     )
 
-            response.set_cookie('student', student)
+            set_student_cookie(response, student)
             return response
 
         else:
@@ -667,9 +666,9 @@ def studentform1(request):
 
     
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
             teachers = TeacherInfo.objects.filter(department=student.department)
             response =  render(
                     request,
@@ -862,9 +861,9 @@ def studentform2(request):
 
 def loginTeacher(request):
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -1147,9 +1146,8 @@ def userDetails(request):
     )
     
 def studentDetails(request):
-    student = request.COOKIES.get("student")
-    if StudentLoginInfo.objects.filter(username__exact = student).exists():
-        student = StudentLoginInfo.objects.get(username__exact = student)
+    student = current_student(request)
+    if student is not None:
         return render(
             request,
             "studentDetails.html",
@@ -1266,14 +1264,15 @@ def studentPasswordChange(request):
         confirm_password = request.POST.get("confirm_password")
 
         # to obtain old password,
-        student = StudentLoginInfo.objects.get(username=request.COOKIES.get("student"))
+        student = current_student(request)
+        if student is None:
+            return redirect("/loginStudent")
         current_password = student.password
 
         # confirming typed old password is true or not
         old_new_check = check_password(typed_password, current_password)
         if old_new_check:
             if new_password == confirm_password:
-                student = StudentLoginInfo.objects.get(username=student)
                 student.password = make_password(new_password)
                 student.save()
                 response = redirect(loginStudent)

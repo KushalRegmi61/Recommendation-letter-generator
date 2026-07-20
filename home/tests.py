@@ -2,6 +2,7 @@ import os
 import tempfile
 from datetime import date, datetime
 
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
@@ -37,6 +38,28 @@ def login_as_teacher(client, teacher, password="test-pw"):
         user.save()
     client.force_login(user)
     return user
+
+
+def login_as_student(client, student):
+    """Give ``client`` a validly signed ``student`` cookie.
+
+    Replaces the old ``client.cookies["student"] = "name"`` idiom: an unsigned
+    value no longer resolves to anyone.
+    """
+    from home.identity import set_student_cookie
+
+    class _Carrier:
+        def __init__(self):
+            self.cookies = {}
+
+        def set_cookie(self, key, value, **kwargs):
+            self.cookies[key] = value
+
+    carrier = _Carrier()
+    set_student_cookie(carrier, student)
+    for key, value in carrier.cookies.items():
+        client.cookies[key] = value
+    return student
 
 
 class ModelFieldTests(TestCase):
@@ -329,7 +352,7 @@ class Studentform1RenderTests(TestCase):
         )
 
     def test_form_has_new_fr2_inputs(self):
-        self.client.cookies["student"] = "fay"
+        login_as_student(self.client, self.student)
         resp = self.client.get("/studentform1")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
@@ -2957,3 +2980,71 @@ class ProfessorRegistrationLinksAccountTests(TestCase):
         request = RequestFactory().get("/")
         request.user = teacher.user
         self.assertEqual(current_teacher(request), teacher)
+
+
+class StudentCookieSigningTests(TestCase):
+    """The student cookie must be tamper-evident."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Real Student", roll_number="080BCT960", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+        self.victim = StudentLoginInfo.objects.create(
+            username="Other Student", roll_number="080BCT961", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+        self.factory = RequestFactory()
+
+    def _request(self, cookies):
+        request = self.factory.get("/")
+        request.COOKIES.update(cookies)
+        return request
+
+    def _sign(self, value):
+        from django.core import signing
+        from home.identity import STUDENT_COOKIE_SALT
+        return signing.get_cookie_signer(salt=STUDENT_COOKIE_SALT).sign(value)
+
+    def test_an_unsigned_cookie_is_rejected(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({"student": "Other Student"})))
+
+    def test_a_signed_cookie_resolves(self):
+        from home.identity import current_student
+        self.assertEqual(
+            current_student(self._request({"student": self._sign("Real Student")})),
+            self.student,
+        )
+
+    def test_a_tampered_signature_is_rejected(self):
+        from home.identity import current_student
+        tampered = self._sign("Real Student").replace("Real Student", "Other Student", 1)
+        self.assertIsNone(current_student(self._request({"student": tampered})))
+
+    def test_a_missing_cookie_resolves_to_none(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({})))
+
+    def test_a_signed_cookie_for_a_deleted_student_resolves_to_none(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({"student": self._sign("Ghost")})))
+
+    def test_login_sets_a_signed_cookie(self):
+        # loginStudent reads POST fields "username" and "pass" (not "password").
+        response = self.client.post("/loginStudent", {
+            "username": "Real Student", "pass": "pw",
+        })
+        raw = response.cookies.get("student")
+        self.assertIsNotNone(raw)
+        self.assertNotEqual(raw.value, "Real Student")
+        self.assertIn(":", raw.value)
+
+    def test_the_cookie_set_at_login_round_trips(self):
+        """The setter and the reader must use the same salt."""
+        from home.identity import current_student
+        self.client.post("/loginStudent", {"username": "Real Student", "pass": "pw"})
+        raw = self.client.cookies["student"].value
+        self.assertEqual(current_student(self._request({"student": raw})), self.student)
