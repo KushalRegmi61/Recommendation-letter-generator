@@ -173,6 +173,26 @@ git commit -m "feat(templates): allow shared system templates without an owner"
 
 **Why a data migration:** every deployment (including the committed `db.sqlite3`) needs the same starting library, and the three hardcoded copies of a default letter currently living in `views.py:1633`, `views.py:1994`, and `views.py:2133` become dead once real templates exist.
 
+> **Revised after review.** The template bodies first written here had four defects, all found by
+> rendering them rather than by reading them:
+> 1. `project.project_title` does not exist on the `Project` model (`models.py:152-156` has
+>    `supervised_project` / `final_project`). Jinja undefined is falsy, so the sentence silently
+>    never rendered.
+> 2. Sentences were broken across source lines. The PDF exporter runs `multi_cell` per `\n`, and
+>    `multi_cell` wraps within a line but never reflows across them, so those became ragged
+>    short lines in the export. **Every paragraph must be one source line** — the convention the
+>    pre-existing default template at `views.py:1645-1672` already follows.
+> 3. Unguarded `{{ app.std.program.program_name }}` / `{{ ...dept_name }}` are nullable, so a
+>    sparse application rendered the literal word `None` into the prose.
+> 4. With no `university`, the Research template emitted a period alone on its own line.
+>
+> The bodies below are the corrected ones. Optional paragraphs use the whitespace-control idiom
+> `{%- if cond %}` / blank line / one-line paragraph / `{%- endif %}`, which contributes either
+> `\n\n<paragraph>` or nothing at all. Two extra tests
+> (`test_seeded_templates_render_without_leaking_none`,
+> `test_seeded_paragraphs_are_single_source_lines`) lock all four fixes in; the original four
+> tests could not have caught any of them, because none of them rendered a template.
+
 - [ ] **Step 1: Write the failing test**
 
 Append to `home/tests.py`:
