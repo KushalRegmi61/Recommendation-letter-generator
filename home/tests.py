@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
-    StudentLoginInfo, TeacherInfo,
+    StudentLoginInfo, TeacherInfo, CustomTemplates,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
@@ -838,3 +838,33 @@ class DownloadGeneratedTests(TestCase):
             with self.subTest(bad=bad):
                 response = self.client.get(f"/download_generated/?id={bad}")
                 self.assertEqual(response.status_code, 404)
+
+
+class SystemTemplateModelTests(TestCase):
+    """CustomTemplates must support shared system templates (FR-1)."""
+
+    def test_a_system_template_needs_no_professor(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Formal / Academic",
+            template="Dear Committee,",
+            professor=None,
+            is_system=True,
+        )
+        self.assertIsNone(tpl.professor)
+        self.assertTrue(tpl.is_system)
+
+    def test_professor_templates_are_not_system_by_default(self):
+        dept = Department.objects.create(dept_name="BCT")
+        teacher = TeacherInfo.objects.create(
+            name="Prof A", unique_id="T-A", department=dept
+        )
+        tpl = CustomTemplates.objects.create(
+            template_name="Mine", template="Hello", professor=teacher
+        )
+        self.assertFalse(tpl.is_system)
+
+    def test_str_does_not_crash_without_a_professor(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Formal", template="x", professor=None, is_system=True
+        )
+        self.assertIn("Formal", str(tpl))

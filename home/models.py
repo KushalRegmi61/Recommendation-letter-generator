@@ -235,14 +235,19 @@ class Files(models.Model):
         db_table = 'Files'
 
 
-class CustomTemplates(models.Model):             
-    template_name = models.CharField(max_length=100,null=True,blank=True)
-    template = models.TextField(null=True,blank=True)
-    professor = models.ForeignKey(TeacherInfo, on_delete= CASCADE)
-    is_default = models.BooleanField(default=False)  # New field
+class CustomTemplates(models.Model):
+    template_name = models.CharField(max_length=100, null=True, blank=True)
+    template = models.TextField(null=True, blank=True)
+    # System templates are shared by every professor and have no owner.
+    professor = models.ForeignKey(
+        TeacherInfo, on_delete=CASCADE, null=True, blank=True
+    )
+    is_default = models.BooleanField(default=False)
+    is_system = models.BooleanField(default=False)
 
     def __str__(self):
-        return str(self.professor) + " Template"
+        owner = self.professor or "System"
+        return f"{owner} - {self.template_name or 'Untitled'} Template"
 
     class Meta:
         db_table = 'Template'
