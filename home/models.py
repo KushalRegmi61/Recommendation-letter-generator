@@ -176,7 +176,10 @@ class University(models.Model):
         db_table = 'University'
 
 class Qualities(models.Model):
-    application = models.ForeignKey(Application, on_delete= CASCADE)
+    # unique: exactly one row per application. ``renderCustom`` uses
+    # ``update_or_create``, whose ``.get()`` raises MultipleObjectsReturned if
+    # duplicates ever exist. Enforce the invariant instead of coding around it.
+    application = models.OneToOneField(Application, on_delete= CASCADE)
 
     leadership = models.BooleanField(default=False) 
     hardworking = models.BooleanField(default=False) 

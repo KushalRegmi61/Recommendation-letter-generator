@@ -268,6 +268,22 @@ class Studentform2PostTests(TestCase):
         aca = Academics.objects.get(application=self.app)
         self.assertEqual(aca.final_percentage, "88")
 
+    def test_a_failed_qualities_save_does_not_destroy_the_existing_row(self):
+        # studentform2 deletes the old row before saving the replacement. Without
+        # the transaction.atomic() wrapper a failed save leaves the application
+        # permanently Qualities-less.
+        from unittest import mock
+        Qualities.objects.create(
+            application=self.app, extracirricular="OLD MARKER",
+        )
+        with mock.patch.object(Qualities, "save", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/studentform2", data=self._post_data())
+        # The old row must still be there - the delete is rolled back with it.
+        self.assertEqual(
+            Qualities.objects.get(application=self.app).extracirricular, "OLD MARKER"
+        )
+
     def test_duplicate_pending_is_rejected(self):
         # studentform2 fetches-and-updates the existing pending application (via
         # Application.objects.get(std__username=..., professor__name=...)), so the
@@ -2563,4 +2579,60 @@ class MissingUploadTests(TestCase):
         files.transcript.save("transcript.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
         response = self.client.post("/makeLetter", {"roll": "080BCT880"})
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "transcript")
+        # Assert on the link itself, not the bare word "transcript": the fallback
+        # branch renders "No transcript uploaded." and would satisfy that too.
+        files.refresh_from_db()
+        self.assertContains(response, files.transcript.url)
+        self.assertNotContains(response, "No transcript uploaded.")
+
+
+class QualitiesUniquenessTests(TestCase):
+    """One Qualities row per Application, enforced by the database."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof U", unique_id="T-U", email="u@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Unique Student", roll_number="080BCT990", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Unique Student", std=self.student, professor=self.teacher,
+            subjects="Algorithms",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="U", template="{{ app.name }}", professor=self.teacher,
+        )
+        self.client.cookies["unique"] = "T-U"
+
+    def test_a_second_qualities_row_for_one_application_is_rejected(self):
+        Qualities.objects.create(application=self.application)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Qualities.objects.create(application=self.application)
+
+    def test_two_applications_may_each_have_their_own_row(self):
+        other_application = Application.objects.create(
+            name="Unique Student", std=self.student, professor=self.teacher,
+            subjects="Compilers",
+        )
+        Qualities.objects.create(application=self.application)
+        Qualities.objects.create(application=other_application)
+        self.assertEqual(Qualities.objects.count(), 2)
+
+    def test_render_custom_still_works_with_exactly_one_row(self):
+        # The constraint guarantees update_or_create's .get() can never see the
+        # MultipleObjectsReturned case that would 500 the professor.
+        Qualities.objects.create(application=self.application, leadership=True)
+        response = self.client.post(
+            "/renderCustom",
+            {"roll": "080BCT990", "template_id": self.tpl.pk, "quality2": "on"},
+        )
+        self.assertEqual(response.status_code, 200)
+        quality = Qualities.objects.get(application=self.application)
+        self.assertFalse(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertEqual(Qualities.objects.filter(application=self.application).count(), 1)
