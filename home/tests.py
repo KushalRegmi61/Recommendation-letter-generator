@@ -11,7 +11,7 @@ from django.utils import timezone
 from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo, CustomTemplates, Qualities,
-    Paper, Project, Files,
+    Paper, Project, Files, Subject,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
@@ -2855,3 +2855,105 @@ class LoginHelperTests(TestCase):
         request = RequestFactory().get("/")
         request.user = self.teacher.user
         self.assertEqual(current_teacher(request), self.teacher)
+
+
+class CookieImpersonationTests(TestCase):
+    """A forged cookie must not act as anyone (the Phase 4b headline)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.victim = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="T-VIC", email="vic@example.com",
+            department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Victim Student", roll_number="080BCT950", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01",
+        )
+        self.application = Application.objects.create(
+            name="Victim Student", std=self.student, professor=self.victim,
+        )
+        CustomTemplates.objects.create(
+            template_name="Victim Template", template="secret",
+            professor=self.victim, is_default=True,
+        )
+
+    def test_a_forged_cookie_cannot_reach_the_dashboard(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_a_forged_cookie_cannot_list_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        self.assertEqual(self.client.get("/makeTemplate").status_code, 302)
+
+    def test_a_forged_cookie_cannot_preview_a_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.post("/renderCustom", {"roll": "080BCT950"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_forged_cookie_cannot_export_a_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.post(
+            "/download_letter/", {"roll": "080BCT950", "format": "pdf"}
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_forged_cookie_cannot_write_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        self.client.post("/getTemplate", {"content": "x", "templateName": "Injected"})
+        self.assertFalse(
+            CustomTemplates.objects.filter(template_name="Injected").exists()
+        )
+
+    def test_a_forged_cookie_cannot_duplicate_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.client.post("/duplicateTemplate", {"template_id": system.pk})
+        self.assertEqual(
+            CustomTemplates.objects.filter(professor=self.victim).count(), 1
+        )
+
+    def test_a_forged_cookie_cannot_redownload_a_stored_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get(f"/download_generated/?id={self.application.id}")
+        self.assertEqual(response.status_code, 302)
+
+    def test_one_professor_cannot_act_as_another_by_cookie(self):
+        # Signed in as a real professor, but forging someone else's cookie.
+        attacker = TeacherInfo.objects.create(
+            name="Attacker", unique_id="T-ATK", email="atk@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, attacker)
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Victim Template")
+
+
+class ProfessorRegistrationLinksAccountTests(TestCase):
+    """A newly registered professor must be linked to their login account."""
+
+    def test_registering_a_professor_links_the_login_account(self):
+        dept = Department.objects.create(dept_name="BEX")
+        subject = Subject.objects.create(sub_name="Operating Systems")
+        response = self.client.post("/registerProfessor/", {
+            "name": "New Prof", "title": "Professor", "phone": "9800000000",
+            "email": "new@example.com", "department": dept.pk,
+            "subjects": [subject.pk],
+            "password": "pw-12345", "confirm_password": "pw-12345",
+        })
+        self.assertEqual(response.status_code, 302)
+
+        teacher = TeacherInfo.objects.get(email="new@example.com")
+        self.assertIsNotNone(teacher.user)
+        self.assertEqual(teacher.user.email, "new@example.com")
+
+        # And that link is what resolves identity on a real request.
+        from home.identity import current_teacher
+        request = RequestFactory().get("/")
+        request.user = teacher.user
+        self.assertEqual(current_teacher(request), teacher)

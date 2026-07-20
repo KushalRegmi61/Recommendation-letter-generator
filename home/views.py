@@ -18,6 +18,7 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from .forms import TeacherInfoForm
+from home.identity import current_teacher
 from django.contrib import messages
 import random
 import uuid
@@ -93,10 +94,9 @@ def index(request):
         #             },
         #         )
             # return response
-        uid = request.COOKIES.get('unique')            
-        print("teacher " + str(uid))                         #if not student then might be teacher
-        if TeacherInfo.objects.filter(unique_id__exact=uid).exists():
-                unique = request.COOKIES.get('unique')                              #teacher's unique id (see schema diagram)
+        teacher = current_teacher(request)                   #if not student then might be teacher
+        if teacher is not None:
+                unique = teacher.unique_id                                          #teacher's unique id (see schema diagram)
 
 
                 # generate teachers home page
@@ -188,7 +188,10 @@ def final(request, *args, **kwargs):
     if request.method == "POST":
         textarea1 = request.POST.get("textarea1")
         roll = request.POST.get("roll")
-        unique = request.COOKIES.get('unique')
+        teacher = current_teacher(request)
+        if teacher is None:
+            return redirect("/loginTeacher")
+        unique = teacher.unique_id
         application = Application.objects.get(std__roll_number=roll, professor__unique_id=unique)
         
 
@@ -262,9 +265,9 @@ def registerStudent(request):
         #             },
         #         )
         #     return response
-        unique = request.COOKIES.get('unique')
-        if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
         
@@ -325,9 +328,9 @@ def loginStudent(request):
                     )
                     
             return response
-        unique = request.COOKIES.get('unique')
-        if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
     
@@ -422,8 +425,12 @@ def loginStudent(request):
 def make_letter(request):
     if request.method == "POST":
         roll = request.POST.get("roll")
-        teacher_id = request.COOKIES.get("unique")
-        teacher_model = TeacherInfo.objects.get(unique_id=teacher_id)
+        # ``@login_required`` proves someone is signed in; this proves *which*
+        # professor, so the letter is built from their own applications only.
+        teacher_model = current_teacher(request)
+        if teacher_model is None:
+            return redirect("/loginTeacher")
+        teacher_id = teacher_model.unique_id
 
         stu = StudentLoginInfo.objects.get(roll_number=roll)
         appli = Application.objects.get(name=stu.username, professor__unique_id=teacher_id)
@@ -876,9 +883,9 @@ def loginTeacher(request):
                     )
                     
             return response
-        user = request.COOKIES.get('username')
-        if TeacherInfo.objects.filter(name__exact=user).exists():
-                unique = request.COOKIES.get('unique')
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
         return render(request, "loginTeacher.html")
@@ -901,17 +908,13 @@ def loginTeacher(request):
             if user is not None:
                 print("user authenticated")
                 login(request, user)
-                full_name = request.user.get_full_name()
-                x = full_name.split("/")
-                unique = x[-1]
-                print(x)
-                print(f'Unique id {unique}')
-                # teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                try:
-                     teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                except TeacherInfo.DoesNotExist:
-                    messages.error(request, f"No teacher found for ID: {unique}")
-                    return render(request, "loginTeacher.html")  
+                # Resolves via the ``TeacherInfo.user`` link, falling back to the
+                # legacy "Full Name/<unique_id>" convention for unlinked rows.
+                teacher_model = current_teacher(request)
+                if teacher_model is None:
+                    messages.error(request, "No teacher record is linked to this account.")
+                    return render(request, "loginTeacher.html")
+                unique = teacher_model.unique_id
 
                 context = build_teacher_dashboard_context(unique, request.GET)
                 response = render(request, "Teacher.html", context)
@@ -1121,10 +1124,10 @@ def feedback(request):
 def userDetails(request):
     subject=[]
     naya_subjects=[]
-    unique = request.COOKIES.get("unique")
-   
-    
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
+
     email = teacherkonam.email
     username = User.objects.get(email=email)
     subjects=teacherkonam.subjects.all()
@@ -1159,25 +1162,25 @@ def studentDetails(request):
             "studentDetails.html")
     
 def profileUpdate(request):
-    unique = request.COOKIES.get("unique")
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
 
     return render(request, "profileUpdate.html", {"teacher": teacherkonam})
 
 
 def profileUpdateRequest(request):
 
-    unique = request.COOKIES.get("unique")
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
+
     email = teacherkonam.email
     username = User.objects.get(email=email)
 
     if request.method == "POST":
         photo = request.FILES["file"]
 
-        # TeacherInfo.objects.filter(unique_id=unique).update(images=photo)
-
-        teacherkonam = TeacherInfo.objects.get(unique_id=unique)
         teacherkonam.images = photo
         teacherkonam.save()
 
@@ -1403,9 +1406,8 @@ def deleteSubjects(request):
         subject= request.POST.get("subject")
         usernaam = request.COOKIES.get("username")
 
-        unique = request.COOKIES.get("unique")
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        teacher = current_teacher(request)
+        if teacher is not None:
             naya_subject=Subject.objects.get(sub_name=subject)
 
             # to check if subject is in teacher model or not
@@ -1445,12 +1447,12 @@ def getdetails(request):
 
 
 def teacher(request):
-    unique = request.COOKIES.get("unique")
-    # Identity comes from a client-controlled cookie, so an absent or stale
-    # value is an ordinary logged-out visitor, not an error. Every other
-    # Teacher.html entry point already checks this before building context.
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    # Identity comes from the session, never from a cookie: a visitor with no
+    # session is an ordinary logged-out visitor, not an error.
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
     context = build_teacher_dashboard_context(unique, request.GET)
     return render(request, "Teacher.html", context)
 
@@ -1461,9 +1463,10 @@ def renderCustom(request):
     if request.method != "POST":
         return redirect("/teacher")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     roll = request.POST.get("roll")
     application = get_object_or_404(
@@ -1502,11 +1505,10 @@ def renderCustom(request):
 
 def template(request):
     """The professor's template editor: their own templates plus the system library."""
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     return render(request, "customTemplate.html", {
         "professor": teacher,
         "templates": CustomTemplates.objects.filter(professor=teacher),
@@ -1518,13 +1520,12 @@ def getTemplate(request):
     if request.method != "POST":
         return redirect("/makeTemplate")
 
-    # Identity comes from the cookie, never from the posted ``uid`` field: a
+    # Identity comes from the session, never from the posted ``uid`` field: a
     # hidden input is client-controlled and could name another professor.
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     content = request.POST.get("content") or ""
     name = (request.POST.get("templateName") or "").strip()
     if not name:
@@ -1577,11 +1578,10 @@ def duplicate_template(request):
     if request.method != "POST":
         return redirect("/makeTemplate")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     try:
         template_id = int(request.POST.get("template_id", ""))
     except (TypeError, ValueError):
@@ -1709,7 +1709,12 @@ def adminDashboard(request):
             )
             user.email = teacher_info.email
             user.save()
-            
+
+            # Link the record to its login account, so identity resolves from
+            # the session rather than the legacy name convention.
+            teacher_info.user = user
+            teacher_info.save(update_fields=["user"])
+
             # Save many-to-many relationships
             form.save_m2m()
             
@@ -1754,14 +1759,15 @@ from fpdf import FPDF
 def download_generated(request):
     """Re-serve the letter stored on an Application (FR-5).
 
-    Scoped to the professor in the ``unique`` cookie so one professor cannot
+    Scoped to the professor holding the session so one professor cannot
     fetch another's letters by guessing an id. Rows generated before Phase 3
     started stamping ``generated_letter`` have no stored file, so we redirect
     back to the dashboard with an explanation instead of 500-ing.
     """
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     # A missing or non-numeric id would otherwise reach the ORM and raise
     # ValueError, which surfaces as a 500 (and a debug traceback when
@@ -1795,9 +1801,10 @@ def download_letter(request):
     if request.method != "POST":
         return redirect("/teacher")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     file_format = request.POST.get("format")
     if file_format not in ("pdf", "docx"):
@@ -1885,6 +1892,12 @@ def registerProfessor(request):
                 email=teacher_info.email
             )
             user.save()
+
+            # Link the record to its login account, so identity resolves from
+            # the session rather than the legacy name convention.
+            teacher_info.user = user
+            teacher_info.save(update_fields=["user"])
+
             messages.success(request, 'Professor registered successfully! You can now log in.')
             return redirect('loginTeacher')
     else:
