@@ -36,3 +36,23 @@ def apply_application_filters(queryset, params):
         # with two matching universities would appear twice.
         queryset = queryset.distinct()
     return queryset
+
+
+def _distinct_values(queryset, field):
+    """Sorted, de-duplicated, non-empty values of ``field`` in ``queryset``."""
+    values = queryset.values_list(field, flat=True).distinct()
+    return sorted({v for v in values if v not in (None, "")})
+
+
+def filter_options(queryset):
+    """Dropdown choices derived from the applications in ``queryset``.
+
+    Scoping the options to the professor's own applications keeps other
+    professors' students out of the filter bar and avoids offering
+    combinations that can only ever return nothing.
+    """
+    return {
+        "departments": _distinct_values(queryset, "std__department__dept_name"),
+        "countries": _distinct_values(queryset, "university__country"),
+        "colleges": _distinct_values(queryset, "university__uni_name"),
+    }

@@ -4,7 +4,7 @@ from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo,
 )
-from home.filters import apply_application_filters
+from home.filters import apply_application_filters, filter_options
 
 
 class ModelFieldTests(TestCase):
@@ -381,3 +381,61 @@ class ApplicationFilterTests(TestCase):
         )
         result = apply_application_filters(self.base_qs(), {"country": "USA"})
         self.assertEqual(result.count(), 1)
+
+
+class FilterOptionTests(TestCase):
+    def setUp(self):
+        dept_bct = Department.objects.create(dept_name="BCT")
+        dept_bex = Department.objects.create(dept_name="BEX")
+        prog_bct = Program.objects.create(program_name="BE-BCT", department=dept_bct)
+        prog_bex = Program.objects.create(program_name="BE-BEX", department=dept_bex)
+        self.mine = TeacherInfo.objects.create(
+            unique_id="T200", name="Mine", email="mine@example.com", department=dept_bct,
+        )
+        other = TeacherInfo.objects.create(
+            unique_id="T201", name="Other", email="other@example.com", department=dept_bct,
+        )
+        stu_a = StudentLoginInfo.objects.create(
+            username="ann", roll_number="080BCT010", department=dept_bct,
+            program=prog_bct, password="x", dob="2000-01-01",
+        )
+        stu_b = StudentLoginInfo.objects.create(
+            username="ben", roll_number="080BEX011", department=dept_bex,
+            program=prog_bex, password="x", dob="2000-01-01",
+        )
+        app_a = Application.objects.create(
+            name="ann", email="ann@example.com", professor=self.mine, std=stu_a,
+        )
+        app_b = Application.objects.create(
+            name="ben", email="ben@example.com", professor=self.mine, std=stu_b,
+        )
+        app_other = Application.objects.create(
+            name="zed", email="zed@example.com", professor=other, std=stu_a,
+        )
+        University.objects.create(uni_name="MIT", country="USA", application=app_a)
+        University.objects.create(uni_name="MIT", country="USA", application=app_b)
+        University.objects.create(uni_name="Aalto", country="Finland", application=app_b)
+        University.objects.create(
+            uni_name="SecretU", country="Japan", application=app_other,
+        )
+
+    def base_qs(self):
+        return Application.objects.filter(professor__unique_id="T200")
+
+    def test_options_are_sorted_and_deduplicated(self):
+        options = filter_options(self.base_qs())
+        self.assertEqual(options["departments"], ["BCT", "BEX"])
+        self.assertEqual(options["countries"], ["Finland", "USA"])
+        self.assertEqual(options["colleges"], ["Aalto", "MIT"])
+
+    def test_options_exclude_other_professors_values(self):
+        options = filter_options(self.base_qs())
+        self.assertNotIn("Japan", options["countries"])
+        self.assertNotIn("SecretU", options["colleges"])
+
+    def test_blank_and_null_values_are_omitted(self):
+        app = Application.objects.get(name="ann")
+        University.objects.create(uni_name="", country=None, application=app)
+        options = filter_options(self.base_qs())
+        self.assertNotIn("", options["colleges"])
+        self.assertNotIn(None, options["countries"])
