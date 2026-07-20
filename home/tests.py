@@ -382,6 +382,66 @@ class ApplicationFilterTests(TestCase):
         result = apply_application_filters(self.base_qs(), {"country": "USA"})
         self.assertEqual(result.count(), 1)
 
+    def test_search_matches_application_name(self):
+        result = apply_application_filters(self.base_qs(), {"q": "alice"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_is_case_insensitive_and_partial(self):
+        result = apply_application_filters(self.base_qs(), {"q": "AL"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_matches_roll_number(self):
+        result = apply_application_filters(self.base_qs(), {"q": "080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_email(self):
+        result = apply_application_filters(self.base_qs(), {"q": "b@example.com"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_first_or_last_name_fields(self):
+        self.app_bce.first_name = "Bobby"
+        self.app_bce.last_name = "Tables"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "tables"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_blank_search_is_ignored(self):
+        result = apply_application_filters(self.base_qs(), {"q": "   "})
+        self.assertEqual(result.count(), 2)
+
+    def test_search_combines_with_dropdown_filters(self):
+        # alice matches the text, but her university is in the USA, not Finland.
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "Netherlands"}
+        )
+        self.assertEqual(result.count(), 0)
+
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "USA"}
+        )
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_terms_are_anded_regardless_of_word_order(self):
+        self.app_bce.first_name = "Ramesh"
+        self.app_bce.last_name = "Shrestha"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "shrestha ramesh"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_terms_may_match_different_fields(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_every_term_must_match(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bct"})
+        self.assertEqual(result.count(), 0)
+
+    def test_search_does_not_match_university_name(self):
+        # University search is the dropdowns' job; matching it here would
+        # surprise a professor searching for a person.
+        result = apply_application_filters(self.base_qs(), {"q": "MIT"})
+        self.assertEqual(result.count(), 0)
+
 
 class FilterOptionTests(TestCase):
     def setUp(self):

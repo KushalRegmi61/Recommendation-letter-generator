@@ -5,8 +5,21 @@ Pure ORM logic — no HTTP, no cookies. Callers pass an already-scoped
 GET parameters.
 """
 
+from django.db.models import Q
+
 #: GET parameter names the dashboard understands.
-FILTER_PARAMS = ("department", "country", "college")
+FILTER_PARAMS = ("department", "country", "college", "q")
+
+#: Fields the free-text box searches. Student identity only — university
+#: name/country are covered by the dropdowns.
+SEARCH_FIELDS = (
+    "name",
+    "first_name",
+    "last_name",
+    "email",
+    "std__roll_number",
+    "std__username",
+)
 
 
 def apply_application_filters(queryset, params):
@@ -30,6 +43,17 @@ def apply_application_filters(queryset, params):
         queryset = queryset.filter(university__country__icontains=country)
     if college:
         queryset = queryset.filter(university__uni_name__icontains=college)
+
+    search = (params.get("q") or "").strip()
+    if search:
+        # Each whitespace-separated term must match SOME field (AND of ORs), so
+        # "shrestha ramesh" finds "Ramesh Shrestha" despite the word order, and
+        # "ramesh 080bct" can match the name and the roll number separately.
+        for term in search.split():
+            matches = Q()
+            for field in SEARCH_FIELDS:
+                matches |= Q(**{f"{field}__icontains": term})
+            queryset = queryset.filter(matches)
 
     if country or college:
         # ``university`` is a to-many join: without distinct() an application
