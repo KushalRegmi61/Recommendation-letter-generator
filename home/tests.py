@@ -1,9 +1,16 @@
+from datetime import datetime
+
+from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
 from django.test import TestCase, SimpleTestCase, override_settings
+from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo,
 )
+from home.filters import apply_application_filters, filter_options
+from home.dashboard import build_teacher_dashboard_context
 
 
 class ModelFieldTests(TestCase):
@@ -292,3 +299,542 @@ class Studentform1RenderTests(TestCase):
             'name="weak_points"',
         ]:
             self.assertIn(field, html, f"missing input: {field}")
+
+
+class ApplicationFilterTests(TestCase):
+    def setUp(self):
+        self.dept_bct = Department.objects.create(dept_name="BCT")
+        self.dept_bce = Department.objects.create(dept_name="BCE")
+        prog_bct = Program.objects.create(program_name="BE-BCT", department=self.dept_bct)
+        prog_bce = Program.objects.create(program_name="BE-BCE", department=self.dept_bce)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T100", name="Prof One", email="p1@example.com",
+            department=self.dept_bct,
+        )
+        self.stu_bct = StudentLoginInfo.objects.create(
+            username="alice", roll_number="080BCT001", department=self.dept_bct,
+            program=prog_bct, password="x", dob="2000-01-01",
+        )
+        self.stu_bce = StudentLoginInfo.objects.create(
+            username="bob", roll_number="080BCE002", department=self.dept_bce,
+            program=prog_bce, password="x", dob="2000-01-01",
+        )
+        self.app_bct = Application.objects.create(
+            name="alice", email="a@example.com", professor=self.prof, std=self.stu_bct,
+        )
+        self.app_bce = Application.objects.create(
+            name="bob", email="b@example.com", professor=self.prof, std=self.stu_bce,
+        )
+        University.objects.create(
+            uni_name="MIT", country="USA", application=self.app_bct,
+        )
+        University.objects.create(
+            uni_name="TU Delft", country="Netherlands", application=self.app_bce,
+        )
+
+    def base_qs(self):
+        return Application.objects.filter(professor__unique_id="T100")
+
+    def test_empty_params_returns_everything(self):
+        result = apply_application_filters(self.base_qs(), {})
+        self.assertEqual(result.count(), 2)
+
+    def test_blank_values_are_ignored(self):
+        result = apply_application_filters(
+            self.base_qs(), {"department": "", "country": "", "college": ""}
+        )
+        self.assertEqual(result.count(), 2)
+
+    def test_filter_by_department(self):
+        result = apply_application_filters(self.base_qs(), {"department": "BCT"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_filter_by_country(self):
+        result = apply_application_filters(self.base_qs(), {"country": "USA"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_filter_by_college(self):
+        result = apply_application_filters(self.base_qs(), {"college": "TU Delft"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_filters_combine_with_and(self):
+        # BCT department but a Netherlands university -> no match
+        result = apply_application_filters(
+            self.base_qs(), {"department": "BCT", "country": "Netherlands"}
+        )
+        self.assertEqual(result.count(), 0)
+
+        result = apply_application_filters(
+            self.base_qs(), {"department": "BCT", "country": "USA"}
+        )
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_partial_and_case_insensitive_dropdown_values_match(self):
+        # The dropdowns are typeable comboboxes, so a half-typed value must work.
+        result = apply_application_filters(self.base_qs(), {"country": "us"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+        result = apply_application_filters(self.base_qs(), {"college": "delft"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+        result = apply_application_filters(self.base_qs(), {"department": "bct"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_no_duplicate_rows_when_application_has_many_universities(self):
+        # A second USA university on the same application must not duplicate it.
+        University.objects.create(
+            uni_name="Stanford", country="USA", application=self.app_bct,
+        )
+        result = apply_application_filters(self.base_qs(), {"country": "USA"})
+        self.assertEqual(result.count(), 1)
+
+    def test_search_matches_application_name(self):
+        result = apply_application_filters(self.base_qs(), {"q": "alice"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_is_case_insensitive_and_partial(self):
+        result = apply_application_filters(self.base_qs(), {"q": "AL"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_matches_roll_number(self):
+        result = apply_application_filters(self.base_qs(), {"q": "080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_email(self):
+        result = apply_application_filters(self.base_qs(), {"q": "b@example.com"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_matches_first_or_last_name_fields(self):
+        self.app_bce.first_name = "Bobby"
+        self.app_bce.last_name = "Tables"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "tables"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_blank_search_is_ignored(self):
+        result = apply_application_filters(self.base_qs(), {"q": "   "})
+        self.assertEqual(result.count(), 2)
+
+    def test_search_combines_with_dropdown_filters(self):
+        # alice matches the text, but her university is in the USA, not Finland.
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "Netherlands"}
+        )
+        self.assertEqual(result.count(), 0)
+
+        result = apply_application_filters(
+            self.base_qs(), {"q": "alice", "country": "USA"}
+        )
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_search_terms_are_anded_regardless_of_word_order(self):
+        self.app_bce.first_name = "Ramesh"
+        self.app_bce.last_name = "Shrestha"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "shrestha ramesh"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_terms_may_match_different_fields(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_every_term_must_match(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bct"})
+        self.assertEqual(result.count(), 0)
+
+    def test_search_does_not_match_university_name(self):
+        # University search is the dropdowns' job; matching it here would
+        # surprise a professor searching for a person.
+        result = apply_application_filters(self.base_qs(), {"q": "MIT"})
+        self.assertEqual(result.count(), 0)
+
+
+class FilterOptionTests(TestCase):
+    def setUp(self):
+        dept_bct = Department.objects.create(dept_name="BCT")
+        dept_bex = Department.objects.create(dept_name="BEX")
+        prog_bct = Program.objects.create(program_name="BE-BCT", department=dept_bct)
+        prog_bex = Program.objects.create(program_name="BE-BEX", department=dept_bex)
+        self.mine = TeacherInfo.objects.create(
+            unique_id="T200", name="Mine", email="mine@example.com", department=dept_bct,
+        )
+        other = TeacherInfo.objects.create(
+            unique_id="T201", name="Other", email="other@example.com", department=dept_bct,
+        )
+        stu_a = StudentLoginInfo.objects.create(
+            username="ann", roll_number="080BCT010", department=dept_bct,
+            program=prog_bct, password="x", dob="2000-01-01",
+        )
+        stu_b = StudentLoginInfo.objects.create(
+            username="ben", roll_number="080BEX011", department=dept_bex,
+            program=prog_bex, password="x", dob="2000-01-01",
+        )
+        app_a = Application.objects.create(
+            name="ann", email="ann@example.com", professor=self.mine, std=stu_a,
+        )
+        app_b = Application.objects.create(
+            name="ben", email="ben@example.com", professor=self.mine, std=stu_b,
+        )
+        app_other = Application.objects.create(
+            name="zed", email="zed@example.com", professor=other, std=stu_a,
+        )
+        University.objects.create(uni_name="MIT", country="USA", application=app_a)
+        University.objects.create(uni_name="MIT", country="USA", application=app_b)
+        University.objects.create(uni_name="Aalto", country="Finland", application=app_b)
+        University.objects.create(
+            uni_name="SecretU", country="Japan", application=app_other,
+        )
+
+    def base_qs(self):
+        return Application.objects.filter(professor__unique_id="T200")
+
+    def test_options_are_sorted_and_deduplicated(self):
+        options = filter_options(self.base_qs())
+        self.assertEqual(options["departments"], ["BCT", "BEX"])
+        self.assertEqual(options["countries"], ["Finland", "USA"])
+        self.assertEqual(options["colleges"], ["Aalto", "MIT"])
+
+    def test_options_exclude_other_professors_values(self):
+        options = filter_options(self.base_qs())
+        self.assertNotIn("Japan", options["countries"])
+        self.assertNotIn("SecretU", options["colleges"])
+
+    def test_blank_and_null_values_are_omitted(self):
+        app = Application.objects.get(name="ann")
+        University.objects.create(uni_name="", country=None, application=app)
+        options = filter_options(self.base_qs())
+        self.assertNotIn("", options["colleges"])
+        self.assertNotIn(None, options["countries"])
+
+
+class DashboardContextTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T300", name="Prof Three", email="p3@example.com", department=dept,
+        )
+        self.stu = StudentLoginInfo.objects.create(
+            username="cara", roll_number="080BCT020", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.pending = Application.objects.create(
+            name="cara pending", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=False,
+        )
+        self.older = Application.objects.create(
+            name="cara older", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=True,
+            generated_at=timezone.make_aware(datetime(2026, 1, 1, 9, 0)),
+        )
+        self.newer = Application.objects.create(
+            name="cara newer", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=True,
+            generated_at=timezone.make_aware(datetime(2026, 5, 1, 9, 0)),
+        )
+        University.objects.create(uni_name="MIT", country="USA", application=self.newer)
+        University.objects.create(
+            uni_name="Aalto", country="Finland", application=self.older,
+        )
+
+    def test_splits_pending_and_generated(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual([a.pk for a in ctx["student_list"]], [self.pending.pk])
+        self.assertEqual(len(ctx["all_students"]), 2)
+
+    def test_generated_list_is_newest_first(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual(
+            [a.pk for a in ctx["all_students"]], [self.newer.pk, self.older.pk]
+        )
+
+    def test_filters_apply_to_both_lists(self):
+        ctx = build_teacher_dashboard_context("T300", {"country": "USA"})
+        self.assertEqual([a.pk for a in ctx["all_students"]], [self.newer.pk])
+        # The pending application has no USA university, so it drops out too.
+        self.assertEqual(list(ctx["student_list"]), [])
+
+    def test_context_exposes_options_and_active_filters(self):
+        ctx = build_teacher_dashboard_context("T300", {"country": "USA"})
+        self.assertEqual(ctx["filter_options"]["countries"], ["Finland", "USA"])
+        self.assertEqual(ctx["active_filters"]["country"], "USA")
+        self.assertEqual(ctx["active_filters"]["department"], "")
+        self.assertTrue(ctx["filters_active"])
+
+    def test_no_filters_means_filters_inactive(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertFalse(ctx["filters_active"])
+
+    def test_search_narrows_both_lists_and_counts_as_active(self):
+        ctx = build_teacher_dashboard_context("T300", {"q": "newer"})
+        self.assertEqual([a.pk for a in ctx["all_students"]], [self.newer.pk])
+        self.assertEqual(list(ctx["student_list"]), [])
+        self.assertEqual(ctx["active_filters"]["q"], "newer")
+        self.assertTrue(ctx["filters_active"])
+
+    def test_teacher_with_no_generated_letters_does_not_crash(self):
+        Application.objects.filter(is_generated=True).delete()
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual(list(ctx["all_students"]), [])
+        self.assertFalse(ctx["check_value"])
+
+    def test_check_value_true_when_nothing_pending(self):
+        self.pending.delete()
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertTrue(ctx["check_value"])
+
+
+class TeacherDashboardViewTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T400", name="Prof Four", email="p4@example.com", department=dept,
+        )
+        stu = StudentLoginInfo.objects.create(
+            username="dan", roll_number="080BCT030", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.usa_app = Application.objects.create(
+            name="dan usa", email="d@example.com", professor=self.prof,
+            std=stu, is_generated=False,
+        )
+        self.fin_app = Application.objects.create(
+            name="dan finland", email="d@example.com", professor=self.prof,
+            std=stu, is_generated=False,
+        )
+        University.objects.create(
+            uni_name="MIT", country="USA", application=self.usa_app,
+        )
+        University.objects.create(
+            uni_name="Aalto", country="Finland", application=self.fin_app,
+        )
+        self.client.cookies["unique"] = "T400"
+        self.client.cookies["username"] = "Prof Four"
+
+    def test_teacher_view_renders_all_applications_by_default(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "dan usa")
+        self.assertContains(response, "dan finland")
+
+    def test_teacher_view_applies_country_filter(self):
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_teacher_view_exposes_filter_options(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["filter_options"]["countries"],
+                         ["Finland", "USA"])
+
+    def test_login_teacher_get_does_not_crash_without_generated_letters(self):
+        # Regression: loginTeacher used Application.objects.get(is_generated=True),
+        # which raised DoesNotExist for a professor with no generated letters.
+        response = self.client.get("/loginTeacher")
+        self.assertEqual(response.status_code, 200)
+
+    def test_login_teacher_get_does_not_crash_with_two_generated_letters(self):
+        # Regression: the same .get() raised MultipleObjectsReturned.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/loginTeacher")
+        self.assertEqual(response.status_code, 200)
+
+    def test_all_teacher_dashboard_entry_points_supply_filter_options(self):
+        # Teacher.html is rendered from several views; every one of them must
+        # provide the filter context or the filter bar renders empty.
+        for path in ("/", "/loginStudent", "/registerStudent"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.context["filter_options"]["countries"],
+                    ["Finland", "USA"],
+                )
+                self.assertEqual(response.context["generated_count"], 0)
+
+    def test_login_teacher_post_supplies_filter_options(self):
+        user = User.objects.create_user(
+            username="prof4", email="p4@example.com", password="secret",
+        )
+        user.first_name = "Prof Four/T400"
+        user.save()
+        response = self.client.post(
+            "/loginTeacher", {"username": "p4@example.com", "password": "secret"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["filter_options"]["countries"], ["Finland", "USA"]
+        )
+
+    def test_filter_bar_is_rendered_with_typeable_comboboxes(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, 'name="department"')
+        self.assertContains(response, 'name="country"')
+        self.assertContains(response, 'name="college"')
+        # Each field is an <input list=...> backed by a <datalist> of suggestions,
+        # so the professor can either pick a value or type a partial one.
+        self.assertContains(response, 'list="country-options"')
+        self.assertContains(response, '<datalist id="country-options">')
+        self.assertContains(response, '<option value="Finland">')
+        self.assertContains(response, '<option value="MIT">')
+
+    def test_active_filter_value_is_kept_in_the_box(self):
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertContains(response, 'value="USA"')
+
+    def test_partially_typed_filter_value_still_matches(self):
+        response = self.client.get("/teacher", {"country": "us"})
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_search_box_is_rendered_and_keeps_its_value(self):
+        response = self.client.get("/teacher", {"q": "dan usa"})
+        self.assertContains(response, 'name="q"')
+        self.assertContains(response, 'value="dan usa"')
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_generated_table_has_tracking_columns(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, "Generated on")
+        self.assertContains(response, "Template")
+
+    def test_empty_state_distinguishes_no_requests_from_no_matches(self):
+        # No filter and nothing pending -> the cheerful global message.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/teacher")
+        self.assertContains(response, "You have no request for now")
+
+        # A filter that matches nothing must NOT claim there are no requests at all.
+        Application.objects.filter(professor=self.prof).update(is_generated=False)
+        response = self.client.get("/teacher", {"country": "Antarctica"})
+        self.assertContains(response, "No pending requests match")
+        self.assertNotContains(response, "You have no request for now")
+
+    def test_generated_count_is_shown(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["generated_count"], 0)
+
+    def test_dashboard_never_shows_another_professors_students(self):
+        other_dept = Department.objects.create(dept_name="BEX")
+        other_prog = Program.objects.create(
+            program_name="BE-BEX", department=other_dept,
+        )
+        other_prof = TeacherInfo.objects.create(
+            unique_id="T999", name="Prof Nine", email="p9@example.com",
+            department=other_dept,
+        )
+        other_stu = StudentLoginInfo.objects.create(
+            username="zoe", roll_number="080BEX099", department=other_dept,
+            program=other_prog, password="x", dob="2000-01-01",
+        )
+        secret = Application.objects.create(
+            name="zoe secret", email="z@example.com", professor=other_prof,
+            std=other_stu, is_generated=False,
+        )
+        University.objects.create(
+            uni_name="SecretU", country="Japan", application=secret,
+        )
+
+        response = self.client.get("/teacher")
+        self.assertNotContains(response, "zoe secret")
+        # Nor may the other professor's values leak into the filter suggestions.
+        self.assertNotIn("Japan", response.context["filter_options"]["countries"])
+        self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
+        self.assertNotIn("BEX", response.context["filter_options"]["departments"])
+
+    def test_teacher_view_redirects_when_cookie_is_missing(self):
+        del self.client.cookies["unique"]
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_teacher_view_redirects_when_cookie_is_stale(self):
+        # A professor whose TeacherInfo was removed, or a hand-edited cookie.
+        self.client.cookies["unique"] = "T000-does-not-exist"
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_redownload_link_shown_only_when_a_letter_is_stored(self):
+        from django.core.files.base import ContentFile
+
+        stored = Application.objects.create(
+            name="dan stored", email="d@example.com", professor=self.prof,
+            std=self.usa_app.std, is_generated=True,
+        )
+        response = self.client.get("/teacher")
+        self.assertNotContains(response, f"/download_generated/?id={stored.pk}")
+
+        stored.generated_letter.save(
+            "dan.pdf", ContentFile(b"%PDF-1.4 x"), save=True,
+        )
+        try:
+            response = self.client.get("/teacher")
+            self.assertContains(response, f"/download_generated/?id={stored.pk}")
+        finally:
+            stored.generated_letter.delete(save=False)
+
+
+class DownloadGeneratedTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T500", name="Prof Five", email="p5@example.com", department=dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            unique_id="T501", name="Prof Six", email="p6@example.com", department=dept,
+        )
+        stu = StudentLoginInfo.objects.create(
+            username="eve", roll_number="080BCT040", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.stored = Application.objects.create(
+            name="eve stored", email="e@example.com", professor=self.prof,
+            std=stu, is_generated=True,
+        )
+        self.stored.generated_letter.save(
+            "eve.pdf", ContentFile(b"%PDF-1.4 fake letter"), save=True,
+        )
+        self.legacy = Application.objects.create(
+            name="eve legacy", email="e@example.com", professor=self.prof,
+            std=stu, is_generated=True,
+        )
+        self.client.cookies["unique"] = "T500"
+
+    def tearDown(self):
+        self.stored.generated_letter.delete(save=False)
+
+    def test_returns_stored_file(self):
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 fake letter")
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_missing_stored_file_redirects_with_message(self):
+        response = self.client.get(f"/download_generated/?id={self.legacy.pk}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/teacher")
+
+    def test_other_professors_letter_is_not_served(self):
+        self.client.cookies["unique"] = "T501"
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_request_is_not_served(self):
+        del self.client.cookies["unique"]
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_missing_id_parameter_is_not_served(self):
+        response = self.client.get("/download_generated/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_malformed_id_is_not_served(self):
+        for bad in ("abc", "1 OR 1=1", "5.0", ""):
+            with self.subTest(bad=bad):
+                response = self.client.get(f"/download_generated/?id={bad}")
+                self.assertEqual(response.status_code, 404)

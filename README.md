@@ -122,7 +122,16 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ### Teacher / Professor
 1. Ask the admin to create your `TeacherInfo` profile and matching superuser.
 2. **Log in** and view incoming requests and the students you have already recommended.
-3. Create/edit your recommendation **templates**, then **generate** the letter (PDF/DOCX).
+3. **Find a student** with the search box — it matches name, roll number, or email. Multiple
+   words all have to match, so `ramesh 080bct` narrows to one person.
+4. **Filter** by Department / Country / College. Each box suggests the values that appear in your
+   own applications, but you can also type a partial value (`us` matches USA). Search and filters
+   combine, and both apply to the pending list *and* the recommended list — so you can answer
+   "whom have I recommended who applied to the USA". **Clear** resets everything.
+5. The recommended-students table shows **when** each letter was generated, **which template**
+   produced it, and a **Re-download** link for letters whose file was stored. Entries show `—`
+   until letter generation starts recording that information.
+6. Create/edit your recommendation **templates**, then **generate** the letter (PDF/DOCX).
 
 ### Admin
 - Manage programs, departments, teachers, templates, and all application data via `/admin/`.
@@ -132,9 +141,12 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ## Running tests
 
 ```bash
-python manage.py test home          # run the app's test suite
-python manage.py test home.tests.ModelFieldTests   # a single test class
+python manage.py test home                          # run the app's test suite (70 tests)
+python manage.py test home.tests.ModelFieldTests    # a single test class
 ```
+
+Some tests deliberately exercise 404 paths, so `[WARNING] Not Found: /download_generated/` lines
+in the output are expected, not failures. Look at the final `OK`.
 
 ---
 
@@ -154,7 +166,10 @@ SMTP authentication error, generate a Gmail **App Password** for a valid account
 
 ```
 auth/            Django project (settings, root urls, wsgi/asgi)
-home/            Main app: models, views, urls, forms, intake helpers, migrations, tests
+home/            Main app: models, views, urls, forms, migrations, tests
+  intake.py      Student LOR-request form helpers (name composition, universities)
+  filters.py     Professor dashboard filtering and student search
+  dashboard.py   Single source of truth for the Teacher.html render context
 templates/       HTML templates (student/teacher/admin pages, letter templates)
 static/          CSS, fonts, images
 media/           Uploaded files (transcripts, CVs, photos, generated letters)

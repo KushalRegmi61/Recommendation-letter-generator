@@ -858,6 +858,119 @@ git commit -m "refactor(teacher): use shared dashboard context and honour GET fi
 
 ---
 
+## Task 5b: Route the remaining `Teacher.html` renders through the builder
+
+**Discovered during Task 5 review.** `Teacher.html` is rendered from **six** places, not two.
+Task 5 converted `teacher()` and the `loginTeacher` GET branch. Four hand-built copies of the
+same ~35-line context block remain:
+
+| Line (approx) | Function |
+|---|---|
+| ~121 | `index()` |
+| ~316 | `registerStudent()` |
+| ~413 | `loginStudent()` |
+| ~1036 | `loginTeacher()` **POST branch** |
+
+All four use `.filter()` and so do **not** carry the `.get()` crash bug — this is not a bug fix.
+But none supplies `filter_options`, `active_filters`, `filters_active`, or `generated_count`.
+Django renders missing template variables as empty, so once Task 6 lands, any professor arriving
+through one of these paths would see a filter bar with **empty dropdowns** and a heading reading
+`Students You Have Recommended ():`. The `loginTeacher` POST branch is the path a professor takes
+every time they log in, so this is the common case, not an edge case.
+
+Converting all four also removes ~140 lines of copy-paste and makes the builder genuinely the
+single source of truth.
+
+**Files:**
+- Modify: `home/views.py`
+- Test: `home/tests.py` (append to `TeacherDashboardViewTests`)
+
+- [ ] **Step 1: Write the failing test**
+
+Add these methods to `TeacherDashboardViewTests`:
+
+```python
+    def test_all_teacher_dashboard_entry_points_supply_filter_options(self):
+        # Teacher.html is rendered from several views; every one of them must
+        # provide the filter context or the filter bar renders empty.
+        for path in ("/", "/loginStudent", "/registerStudent"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.context["filter_options"]["countries"],
+                    ["Finland", "USA"],
+                )
+                self.assertEqual(response.context["generated_count"], 0)
+
+    def test_login_teacher_post_supplies_filter_options(self):
+        user = User.objects.create_user(
+            username="prof4", email="p4@example.com", password="secret",
+        )
+        user.first_name = "Prof Four/T400"
+        user.save()
+        response = self.client.post(
+            "/loginTeacher", {"username": "p4@example.com", "password": "secret"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["filter_options"]["countries"], ["Finland", "USA"]
+        )
+```
+
+Add to the import block at the top of `home/tests.py`:
+
+```python
+from django.contrib.auth.models import User
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `venv/bin/python manage.py test home.tests.TeacherDashboardViewTests -v 2`
+
+Expected: FAIL — `KeyError: 'filter_options'` on the entry points that still hand-build context.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In each of the four locations, replace the hand-built block with a call to the builder. The block
+to replace in each case starts at the line reading:
+
+```python
+                teacher_model = TeacherInfo.objects.get(unique_id=unique)
+```
+
+and ends at its `return response`. Replace the whole span with:
+
+```python
+                context = build_teacher_dashboard_context(unique, request.GET)
+                return render(request, "Teacher.html", context)
+```
+
+**Preserve the exact existing indentation at each site** (they differ — check each one; most are
+16 spaces). Do not change the `if` conditions above the block, the cookie lookups that compute
+`unique`, or anything after the block.
+
+After each replacement, some preceding lines may become dead (e.g. a `value = 0` initialiser that
+nothing reads any more). Remove a line ONLY if you have confirmed by reading the enclosing function
+that nothing else references it. If you are unsure, leave it and note it in your report.
+
+- [ ] **Step 4: Run tests**
+
+Run: `venv/bin/python manage.py test home.tests.TeacherDashboardViewTests -v 2`
+
+Expected: PASS (7 tests).
+
+Then: `venv/bin/python manage.py check` — expected: no issues.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add home/views.py home/tests.py
+git commit -m "refactor(teacher): route every Teacher.html render through the shared context builder"
+```
+
+---
+
 ## Task 6: Filter bar and richer generated table in `Teacher.html`
 
 The view now supplies `filter_options` and `active_filters`, but nothing renders them. Without this task FR-4 is invisible to a real professor — exactly the gap Phase 1 hit with `Studentform1.html`.
@@ -903,6 +1016,22 @@ Add these methods to `TeacherDashboardViewTests`:
         response = self.client.get("/teacher")
         self.assertContains(response, "Generated on")
         self.assertContains(response, "Template")
+
+    def test_empty_state_distinguishes_no_requests_from_no_matches(self):
+        # No filter and nothing pending -> the cheerful global message.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/teacher")
+        self.assertContains(response, "You have no request for now")
+
+        # A filter that matches nothing must NOT claim there are no requests at all.
+        Application.objects.filter(professor=self.prof).update(is_generated=False)
+        response = self.client.get("/teacher", {"country": "Antarctica"})
+        self.assertContains(response, "No pending requests match")
+        self.assertNotContains(response, "You have no request for now")
+
+    def test_generated_count_is_shown(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["generated_count"], 0)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -969,6 +1098,25 @@ Expected: FAIL — the three new tests fail because `Teacher.html` contains no f
 
 Note the `<option>` tags inside a `<datalist>` are value-only and self-closing in practice — no text content and no `</option>`, which is what the tests assert.
 
+**3a-bis.** Fix the now-misleading empty state. `check_value` reflects the *filtered* pending
+list, so with a filter active it can be `True` while the professor still has pending requests
+that simply don't match. The existing copy would then wrongly read "you have no request for
+now". Replace the existing line:
+
+```html
+  <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
+```
+
+with:
+
+```html
+  {% if filters_active %}
+  <h5 style="text-align:center">No pending requests match your search or filter. <a href="/teacher">Show all</a></h5>
+  {% else %}
+  <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
+  {% endif %}
+```
+
 **3b.** Replace the header row of the generated table (currently lines 43–47, the `<tr>` holding `Name` / `Email` / `Letter`) with:
 
 ```html
@@ -994,13 +1142,25 @@ Note the `<option>` tags inside a `<datalist>` are value-only and self-closing i
 
 The em-dash fallbacks matter: every existing row has `generated_at=NULL` until Phase 3 starts stamping it.
 
+**3c-bis.** Surface `generated_count` so it isn't dead context. Change the heading:
+
+```html
+  <h1>Students You Have Recommended:</h1>
+```
+
+to:
+
+```html
+  <h1>Students You Have Recommended ({{ generated_count }}):</h1>
+```
+
 **3d.** The generated row's `</tr>` is currently missing (the loop closes with `{% endfor %}` right after the `</td>`). Add `</tr>` immediately before `{% endfor %}` so the new columns line up.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python manage.py test home.tests.TeacherDashboardViewTests -v 2`
 
-Expected: PASS (10 tests).
+Expected: PASS (12 tests).
 
 - [ ] **Step 5: Commit**
 

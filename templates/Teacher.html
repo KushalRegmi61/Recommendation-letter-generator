@@ -7,9 +7,60 @@
 <h1 style="text-align:center"><br><u> Requests:</u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button class="btn btn-primary" onClick="window.location.reload()">Refresh</button></h1>
 
 <div class="container-fluid">
+  <form method="get" action="/teacher" class="row g-2 align-items-end mb-4">
+    <div class="col-auto">
+      <label for="filter-q" class="form-label">Search student</label>
+      <input class="form-control" id="filter-q" type="search" name="q"
+             placeholder="Name, roll number or email"
+             value="{{ active_filters.q }}">
+    </div>
+    <div class="col-auto">
+      <label for="filter-department" class="form-label">Department</label>
+      <input class="form-control" id="filter-department" name="department"
+             list="department-options" placeholder="All departments"
+             value="{{ active_filters.department }}">
+      <datalist id="department-options">
+        {% for option in filter_options.departments %}
+        <option value="{{ option }}">
+        {% endfor %}
+      </datalist>
+    </div>
+    <div class="col-auto">
+      <label for="filter-country" class="form-label">Country</label>
+      <input class="form-control" id="filter-country" name="country"
+             list="country-options" placeholder="All countries"
+             value="{{ active_filters.country }}">
+      <datalist id="country-options">
+        {% for option in filter_options.countries %}
+        <option value="{{ option }}">
+        {% endfor %}
+      </datalist>
+    </div>
+    <div class="col-auto">
+      <label for="filter-college" class="form-label">College / University</label>
+      <input class="form-control" id="filter-college" name="college"
+             list="college-options" placeholder="All colleges"
+             value="{{ active_filters.college }}">
+      <datalist id="college-options">
+        {% for option in filter_options.colleges %}
+        <option value="{{ option }}">
+        {% endfor %}
+      </datalist>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary" type="submit">Filter</button>
+      {% if filters_active %}
+      <a class="btn btn-secondary" href="/teacher">Clear</a>
+      {% endif %}
+    </div>
+  </form>
   {% if check_value %}
-  
+
+  {% if filters_active %}
+  <h5 style="text-align:center">No pending requests match your search or filter. <a href="/teacher">Show all</a></h5>
+  {% else %}
   <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
+  {% endif %}
   {% else %}
   {% for student in student_list %}
   <div class="alert alert-success" role="alert">
@@ -30,7 +81,7 @@
   <br>
   <br>
   <br>
-  <h1>Students You Have Recommended:</h1>
+  <h1>Students You Have Recommended ({{ generated_count }}):</h1>
   <div class="container-login100-form-btn">
     <button class="login100-form-btn navbar-toggler" id="btn" data-bs-toggle="collapse" data-bs-target="#navbarNav3" aria-controls="navbarNav3" aria-expanded="false" aria-label="Toggle navigation" target="blank" type='submit' value="{{ roll }}" name="roll" style="margin-bottom:30px;">
       View
@@ -43,12 +94,20 @@
         <tr>
           <th>Name</th>
           <th>Email</th>
+          <th>Generated on</th>
+          <th>Template</th>
           <th>Letter</th>
         </tr>
         {% for item in all_students %}
         <tr>
           <td class="fs-5">{{ item.name }}</td>
           <td class="fs-5">{{ item.email }}</td>
+          <td class="fs-5">
+            {% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}—{% endif %}
+          </td>
+          <td class="fs-5">
+            {% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}—{% endif %}
+          </td>
           <td>
             <form action='/studentfinal' method='POST'>
               {% csrf_token %}
@@ -63,7 +122,11 @@
               <input type = 'hidden' value="{{ item.std.roll_number }}" name="roll">
               <input type= "hidden" value="{{ item.professor.name }}" name="prof_name">
             </form>
+            {% if item.generated_letter %}
+            <a class="btn btn-secondary" href="/download_generated/?id={{ item.id }}">Re-download</a>
+            {% endif %}
           </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>

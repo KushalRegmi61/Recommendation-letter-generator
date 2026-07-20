@@ -44,6 +44,7 @@ urlpatterns = [
     path('deleteSubjects', views.deleteSubjects, name='deleteSubjects'),
     path('teacher', views.teacher, name='teacher'),
     path('download_letter/', download_letter, name='download_letter'),
+    path('download_generated/', views.download_generated, name='download_generated'),
 
     ## Added by 78 batch
     path('renderCustom', views.renderCustom, name='renderCustom'),
