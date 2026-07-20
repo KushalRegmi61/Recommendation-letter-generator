@@ -1,10 +1,14 @@
+from datetime import datetime
+
 from django.test import TestCase, SimpleTestCase, override_settings
+from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo,
 )
 from home.filters import apply_application_filters, filter_options
+from home.dashboard import build_teacher_dashboard_context
 
 
 class ModelFieldTests(TestCase):
@@ -499,3 +503,80 @@ class FilterOptionTests(TestCase):
         options = filter_options(self.base_qs())
         self.assertNotIn("", options["colleges"])
         self.assertNotIn(None, options["countries"])
+
+
+class DashboardContextTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T300", name="Prof Three", email="p3@example.com", department=dept,
+        )
+        self.stu = StudentLoginInfo.objects.create(
+            username="cara", roll_number="080BCT020", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.pending = Application.objects.create(
+            name="cara pending", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=False,
+        )
+        self.older = Application.objects.create(
+            name="cara older", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=True,
+            generated_at=timezone.make_aware(datetime(2026, 1, 1, 9, 0)),
+        )
+        self.newer = Application.objects.create(
+            name="cara newer", email="c@example.com", professor=self.prof,
+            std=self.stu, is_generated=True,
+            generated_at=timezone.make_aware(datetime(2026, 5, 1, 9, 0)),
+        )
+        University.objects.create(uni_name="MIT", country="USA", application=self.newer)
+        University.objects.create(
+            uni_name="Aalto", country="Finland", application=self.older,
+        )
+
+    def test_splits_pending_and_generated(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual([a.pk for a in ctx["student_list"]], [self.pending.pk])
+        self.assertEqual(len(ctx["all_students"]), 2)
+
+    def test_generated_list_is_newest_first(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual(
+            [a.pk for a in ctx["all_students"]], [self.newer.pk, self.older.pk]
+        )
+
+    def test_filters_apply_to_both_lists(self):
+        ctx = build_teacher_dashboard_context("T300", {"country": "USA"})
+        self.assertEqual([a.pk for a in ctx["all_students"]], [self.newer.pk])
+        # The pending application has no USA university, so it drops out too.
+        self.assertEqual(list(ctx["student_list"]), [])
+
+    def test_context_exposes_options_and_active_filters(self):
+        ctx = build_teacher_dashboard_context("T300", {"country": "USA"})
+        self.assertEqual(ctx["filter_options"]["countries"], ["Finland", "USA"])
+        self.assertEqual(ctx["active_filters"]["country"], "USA")
+        self.assertEqual(ctx["active_filters"]["department"], "")
+        self.assertTrue(ctx["filters_active"])
+
+    def test_no_filters_means_filters_inactive(self):
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertFalse(ctx["filters_active"])
+
+    def test_search_narrows_both_lists_and_counts_as_active(self):
+        ctx = build_teacher_dashboard_context("T300", {"q": "newer"})
+        self.assertEqual([a.pk for a in ctx["all_students"]], [self.newer.pk])
+        self.assertEqual(list(ctx["student_list"]), [])
+        self.assertEqual(ctx["active_filters"]["q"], "newer")
+        self.assertTrue(ctx["filters_active"])
+
+    def test_teacher_with_no_generated_letters_does_not_crash(self):
+        Application.objects.filter(is_generated=True).delete()
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertEqual(list(ctx["all_students"]), [])
+        self.assertFalse(ctx["check_value"])
+
+    def test_check_value_true_when_nothing_pending(self):
+        self.pending.delete()
+        ctx = build_teacher_dashboard_context("T300", {})
+        self.assertTrue(ctx["check_value"])
