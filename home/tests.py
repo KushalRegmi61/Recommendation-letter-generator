@@ -2683,3 +2683,19 @@ class UnicodePdfTests(TestCase):
             with self.subTest(name=tpl.template_name):
                 letter = render_letter(application, tpl)
                 self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))
+
+
+class RemovedEndpointTests(TestCase):
+    """Dead endpoints are gone, not merely unlinked."""
+
+    def test_the_edit_endpoint_no_longer_exists(self):
+        # It was routed, unguarded, and wrote to the database.
+        self.assertEqual(self.client.post("/edit", {"roll": "x"}).status_code, 404)
+
+    def test_the_edit_view_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "edit"))
+
+    def test_the_testing_view_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "testing"))
