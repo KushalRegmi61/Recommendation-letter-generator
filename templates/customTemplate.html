@@ -215,6 +215,21 @@ Good Luck!
 {% endblock raw %} {% block body %}
 <div class="center-content">
   <h3>Create Recommendation Letter Template</h3>
+  <div class="system-templates" style="margin: 20px 0;">
+    <h3>Starter templates</h3>
+    <p>Copy one into your own templates, then edit it however you like.</p>
+    {% for sys_tpl in system_templates %}
+    <form method="post" action="/duplicateTemplate" style="display:inline-block; margin:4px;">
+      <input type="hidden" name="template_id" value="{{ sys_tpl.pk }}">
+      <button type="submit" class="btn btn-secondary">
+        Duplicate "{{ sys_tpl.template_name }}"
+      </button>
+    </form>
+    {% empty %}
+    <p>No starter templates are installed.</p>
+    {% endfor %}
+  </div>
+
   <form action="/getTemplate" method="post">
     <div class="user-details">
       <!-- if there are existing templates, allow selection for editing -->

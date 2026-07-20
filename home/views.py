@@ -1605,14 +1605,19 @@ def renderCustom(request):
 
 
 def template(request):
-    if request.method == "GET":
-        unique = request.COOKIES.get("unique")
-        teacher = TeacherInfo.objects.get(unique_id=unique)
-        # fetch all templates for this professor so they can see and edit them
-        templates = CustomTemplates.objects.filter(professor=teacher)
+    """The professor's template editor: their own templates plus the system library."""
+    unique = request.COOKIES.get("unique")
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
 
-        return render(request, "customTemplate.html", {'professor': teacher, 'templates': templates})
-    
+    teacher = TeacherInfo.objects.get(unique_id=unique)
+    return render(request, "customTemplate.html", {
+        "professor": teacher,
+        "templates": CustomTemplates.objects.filter(professor=teacher),
+        "system_templates": system_templates().order_by("template_name"),
+    })
+
+
 def getTemplate(request):
     if request.method == "POST":
         content = request.POST.get("content")
@@ -1651,8 +1656,12 @@ def getTemplate(request):
                 is_default=make_default,
             )
 
-        templates = CustomTemplates.objects.filter(professor=teacher)
-        return render(request, "customTemplate.html", {'professor': teacher, 'templates': templates, 'template': template_obj})
+        return render(request, "customTemplate.html", {
+            'professor': teacher,
+            'templates': CustomTemplates.objects.filter(professor=teacher),
+            'system_templates': system_templates().order_by("template_name"),
+            'template': template_obj,
+        })
 
 
 @csrf_exempt

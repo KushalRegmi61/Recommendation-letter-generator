@@ -2152,3 +2152,60 @@ class DuplicateTemplateTests(TestCase):
         self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
         copy = CustomTemplates.objects.get(professor=self.teacher)
         self.assertEqual(select_template(self.teacher, copy.pk), copy)
+
+
+class TemplateEditorViewTests(TestCase):
+    """The editor lists system templates alongside the professor's own (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof K", unique_id="T-K", email="k@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof L", unique_id="T-L", email="l@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="My Own Template", template="body", professor=self.teacher
+        )
+        CustomTemplates.objects.create(
+            template_name="Not Mine At All", template="body", professor=self.other
+        )
+        self.client.cookies["unique"] = "T-K"
+
+    def test_the_professors_own_templates_are_listed(self):
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "My Own Template")
+
+    def test_system_templates_are_offered(self):
+        response = self.client.get("/makeTemplate")
+        self.assertContains(response, "Formal / Academic")
+
+    def test_another_professors_templates_are_not_shown(self):
+        response = self.client.get("/makeTemplate")
+        self.assertNotContains(response, "Not Mine At All")
+
+    def test_each_system_template_has_a_duplicate_button(self):
+        response = self.client.get("/makeTemplate")
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.assertContains(response, "/duplicateTemplate")
+        self.assertContains(response, f'name="template_id" value="{system.pk}"')
+
+    def test_a_stale_cookie_redirects_instead_of_crashing(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_no_cookie_redirects_instead_of_crashing(self):
+        del self.client.cookies["unique"]
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_system_list_survives_a_save(self):
+        # getTemplate re-renders the same page; the section must not vanish.
+        response = self.client.post("/getTemplate", {
+            "content": "Dear Committee", "templateName": "Fresh", "uid": "T-K",
+        })
+        self.assertContains(response, "Formal / Academic")
