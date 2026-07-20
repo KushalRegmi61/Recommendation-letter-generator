@@ -1,7 +1,7 @@
 {% extends 'studentBase.html' %}
 
 {% block title %}Profile{% endblock title %}
-{% block teacher %}<a href="teacher"><img src="{{teacher.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endblock teacher %}
+{% block teacher %}{% if teacher.images %}<a href="teacher"><img src="{{teacher.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
 
 {% block body %}
 {% if messages %}{% for message in messages %}

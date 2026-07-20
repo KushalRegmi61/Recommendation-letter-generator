@@ -1,7 +1,7 @@
 {% extends 'base2.html' %}
 
 {% block title %}Requests{% endblock title %}
-{% block teacher %}<a href="teacher"><img src="{{ teacher_model.images.url }}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endblock teacher %}
+{% block teacher %}{% if teacher_model.images %}<a href="teacher"><img src="{{ teacher_model.images.url }}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
 
 {% block body %}
 <h1 style="text-align:center"><br><u> Requests:</u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button class="btn btn-primary" onClick="window.location.reload()">Refresh</button></h1>

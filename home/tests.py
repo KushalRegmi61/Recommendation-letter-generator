@@ -2515,3 +2515,52 @@ class QualityPersistenceTests(TestCase):
         quality = Qualities.objects.get(application=self.application)
         self.assertEqual(quality.extracirricular, "Robotics club")
         self.assertTrue(quality.leadership)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class MissingUploadTests(TestCase):
+    """A student who skipped an upload must not 500 the letter form."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof R", unique_id="T-R", email="r@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="No Upload", roll_number="080BCT880", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="No Upload", std=self.student, professor=self.teacher, subjects="Maths",
+        )
+        Paper.objects.create(application=self.application)
+        Project.objects.create(application=self.application)
+        University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+        )
+        Qualities.objects.create(application=self.application)
+        Academics.objects.create(application=self.application)
+        # Every file field left empty - the case that used to crash.
+        Files.objects.create(application=self.application)
+        self.user = User.objects.create_user(username="profr", password="pw")
+        self.user.first_name = "Prof R/T-R"
+        self.user.save()
+        self.client.force_login(self.user)
+        self.client.cookies["unique"] = "T-R"
+
+    def test_the_letter_form_renders_without_any_uploads(self):
+        response = self.client.post("/makeLetter", {"roll": "080BCT880"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_dashboard_renders_without_a_teacher_photo(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_present_upload_still_renders_its_link(self):
+        from django.core.files.base import ContentFile
+        files = Files.objects.get(application=self.application)
+        files.transcript.save("transcript.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        response = self.client.post("/makeLetter", {"roll": "080BCT880"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "transcript")

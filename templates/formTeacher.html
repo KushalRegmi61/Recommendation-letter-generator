@@ -1,15 +1,17 @@
 {% extends 'base2.html' %} {% block title %}Generate{% endblock title %} 
-{% block teacher %}<a href="teacher"><img src="{{teacher_model.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endblock teacher %} 
+{% block teacher %}{% if teacher_model.images %}<a href="teacher"><img src="{{teacher_model.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
 {% block body %}
 <div class="container">
   <div class="title">{{student.name}} has given these informations:</div>
   <br />
-  <img src="{{files.Photo.url}}" class="rounded mx-auto d-block"  
+  {% if files.Photo %}
+  <img src="{{files.Photo.url}}" class="rounded mx-auto d-block"
         height="100px"
         width="100px"
-        border-radius="50%" 
-        border-color = "black"         
+        border-radius="50%"
+        border-color = "black"
         alt="Avatar">
+  {% endif %}
   <span class="details">You've known this student for: {{student.years_taught}}</span> <br />
   {% if student.relationship_type %}<span class="details">Relationship: {{student.relationship_type}}</span> <br />{% endif %}
   <span class="details">You've taught: {{student.subjects}}</span> <br />
@@ -46,6 +48,7 @@
 
   <!-- Button trigger modal -->
 
+{% if files.transcript %}
 {% if files.transcript.url|lower|slice:'-4:' == '.pdf' %}
   <!-- Display PDF in new tab -->
   <a href="{{ files.transcript.url }}" class="btn btn-primary" ata-bs-toggle="modal" data-bs-target="#exampleModal1" target="_blank">
@@ -83,10 +86,12 @@
 </div>
 
 {% endif %}
+{% else %}<p>No transcript uploaded.</p>{% endif %}
 
 <br />
 <br/>
 
+{% if files.CV %}
 {% if files.CV.url|lower|slice:'-4:' == '.pdf' %}
   <!-- Display PDF in new tab -->
   <a href="{{ files.CV.url }}" class="btn btn-primary" ata-bs-toggle="modal" data-bs-target="#exampleModal1" target="_blank">
@@ -124,6 +129,7 @@
 </div>
 
 {% endif %}
+{% else %}<p>No CV uploaded.</p>{% endif %}
 
   <br />
   {% if student.paper == "Yes" %}
