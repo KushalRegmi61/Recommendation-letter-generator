@@ -131,6 +131,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+import sys
+
+if "test" in sys.argv:
+    # PBKDF2 is deliberately slow; the suite creates hundreds of users.
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/3.2/topics/i18n/
