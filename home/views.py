@@ -1869,6 +1869,12 @@ def registerProfessor(request):
                 last_name='/' + unique_id,
                 email=teacher_info.email
             )
+            # Self-registration is public and unauthenticated, so a new
+            # professor lands inactive and cannot authenticate until a
+            # superuser approves them (User.is_active is toggleable in the
+            # stock Django admin). Accounts created from adminDashboard are
+            # deliberate and stay active.
+            user.is_active = False
             user.save()
 
             # Link the record to its login account, so identity resolves from
@@ -1876,7 +1882,7 @@ def registerProfessor(request):
             teacher_info.user = user
             teacher_info.save(update_fields=["user"])
 
-            messages.success(request, 'Professor registered successfully! You can now log in.')
+            messages.success(request, 'Professor registered successfully! Your account is awaiting administrator approval - you will be able to log in once it has been approved.')
             return redirect('loginTeacher')
     else:
         form = TeacherInfoForm()
