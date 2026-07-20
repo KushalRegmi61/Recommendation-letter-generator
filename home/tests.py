@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
 from django.test import TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
@@ -743,3 +744,59 @@ class TeacherDashboardViewTests(TestCase):
         self.assertNotIn("Japan", response.context["filter_options"]["countries"])
         self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
         self.assertNotIn("BEX", response.context["filter_options"]["departments"])
+
+
+class DownloadGeneratedTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T500", name="Prof Five", email="p5@example.com", department=dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            unique_id="T501", name="Prof Six", email="p6@example.com", department=dept,
+        )
+        stu = StudentLoginInfo.objects.create(
+            username="eve", roll_number="080BCT040", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.stored = Application.objects.create(
+            name="eve stored", email="e@example.com", professor=self.prof,
+            std=stu, is_generated=True,
+        )
+        self.stored.generated_letter.save(
+            "eve.pdf", ContentFile(b"%PDF-1.4 fake letter"), save=True,
+        )
+        self.legacy = Application.objects.create(
+            name="eve legacy", email="e@example.com", professor=self.prof,
+            std=stu, is_generated=True,
+        )
+        self.client.cookies["unique"] = "T500"
+
+    def tearDown(self):
+        self.stored.generated_letter.delete(save=False)
+
+    def test_returns_stored_file(self):
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 fake letter")
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_missing_stored_file_redirects_with_message(self):
+        response = self.client.get(f"/download_generated/?id={self.legacy.pk}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/teacher")
+
+    def test_other_professors_letter_is_not_served(self):
+        self.client.cookies["unique"] = "T501"
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_request_is_not_served(self):
+        del self.client.cookies["unique"]
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 404)
+
+    def test_missing_id_parameter_is_not_served(self):
+        response = self.client.get("/download_generated/")
+        self.assertEqual(response.status_code, 404)

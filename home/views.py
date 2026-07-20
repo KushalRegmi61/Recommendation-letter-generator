@@ -1,4 +1,5 @@
 import datetime
+import os
 from django.db.models.fields import DateTimeField
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -19,7 +20,7 @@ from collections import OrderedDict
 
 
 # imports from xhtml
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse, Http404
 from django.template.loader import get_template
 #from xhtml2pdf import pisa
 
@@ -1896,6 +1897,38 @@ import datetime
 from fpdf import FPDF
 
 @csrf_exempt
+def download_generated(request):
+    """Re-serve the letter stored on an Application (FR-5).
+
+    Scoped to the professor in the ``unique`` cookie so one professor cannot
+    fetch another's letters by guessing an id. Rows generated before Phase 3
+    started stamping ``generated_letter`` have no stored file, so we redirect
+    back to the dashboard with an explanation instead of 500-ing.
+    """
+    unique = request.COOKIES.get("unique")
+    application_id = request.GET.get("id")
+    if not unique or not application_id:
+        # A missing id would otherwise reach the ORM as pk=None and blow up.
+        raise Http404("Not signed in as a professor, or no letter requested.")
+
+    application = get_object_or_404(
+        Application, pk=application_id, professor__unique_id=unique
+    )
+
+    if not application.generated_letter:
+        messages.error(
+            request,
+            "No stored copy of this letter is available. Generate it again to save a copy.",
+        )
+        return redirect("/teacher")
+
+    return FileResponse(
+        application.generated_letter.open("rb"),
+        as_attachment=True,
+        filename=os.path.basename(application.generated_letter.name),
+    )
+
+
 def download_letter(request):
     if request.method == 'POST':
         roll = request.POST.get('roll')

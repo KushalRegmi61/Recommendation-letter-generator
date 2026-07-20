@@ -122,6 +122,9 @@
               <input type = 'hidden' value="{{ item.std.roll_number }}" name="roll">
               <input type= "hidden" value="{{ item.professor.name }}" name="prof_name">
             </form>
+              {% if item.generated_letter %}
+              <a class="btn btn-secondary" href="/download_generated/?id={{ item.id }}">Re-download</a>
+              {% endif %}
           </td>
         </tr>
         {% endfor %}
