@@ -342,3 +342,42 @@ class ApplicationFilterTests(TestCase):
     def test_filter_by_department(self):
         result = apply_application_filters(self.base_qs(), {"department": "BCT"})
         self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_filter_by_country(self):
+        result = apply_application_filters(self.base_qs(), {"country": "USA"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_filter_by_college(self):
+        result = apply_application_filters(self.base_qs(), {"college": "TU Delft"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_filters_combine_with_and(self):
+        # BCT department but a Netherlands university -> no match
+        result = apply_application_filters(
+            self.base_qs(), {"department": "BCT", "country": "Netherlands"}
+        )
+        self.assertEqual(result.count(), 0)
+
+        result = apply_application_filters(
+            self.base_qs(), {"department": "BCT", "country": "USA"}
+        )
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_partial_and_case_insensitive_dropdown_values_match(self):
+        # The dropdowns are typeable comboboxes, so a half-typed value must work.
+        result = apply_application_filters(self.base_qs(), {"country": "us"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+        result = apply_application_filters(self.base_qs(), {"college": "delft"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+        result = apply_application_filters(self.base_qs(), {"department": "bct"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
+
+    def test_no_duplicate_rows_when_application_has_many_universities(self):
+        # A second USA university on the same application must not duplicate it.
+        University.objects.create(
+            uni_name="Stanford", country="USA", application=self.app_bct,
+        )
+        result = apply_application_filters(self.base_qs(), {"country": "USA"})
+        self.assertEqual(result.count(), 1)
