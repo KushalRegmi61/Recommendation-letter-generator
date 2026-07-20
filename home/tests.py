@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+from unittest import mock
 from datetime import date, datetime
 
 from django.contrib.auth.hashers import check_password, make_password
@@ -18,6 +19,7 @@ from home.models import (
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
+from home import views as _views
 
 
 def login_as_teacher(client, teacher, password="test-pw"):
@@ -3647,3 +3649,58 @@ class ProductionGuardTests(TestCase):
         check_production_config(
             debug=True, secret_key=DEV_SECRET_KEY, allowed_hosts=["*"],
         )
+
+
+class SafeMailTests(TestCase):
+    """SMTP failures are logged, not propagated into the request."""
+
+    def test_a_failing_send_does_not_propagate(self):
+        with mock.patch(
+            "home.views.send_mail", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR") as captured:
+                result = _views.send_mail_safely(
+                    "Subject", "Body", "from@example.com", ["to@example.com"],
+                )
+        self.assertFalse(result)
+        self.assertIn("to@example.com", "\n".join(captured.output))
+
+    def test_a_successful_send_returns_true(self):
+        result = _views.send_mail_safely(
+            "Subject", "Body", "from@example.com", ["to@example.com"],
+        )
+        self.assertTrue(result)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_failing_admin_send_does_not_propagate(self):
+        with mock.patch(
+            "home.views.mail_admins", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR"):
+                result = _views.mail_admins_safely("Subject", "Body")
+        self.assertFalse(result)
+
+    def test_teacher_creation_still_commits_when_mail_fails(self):
+        # The regression this guards: the notification fires *after*
+        # teacher_info.save(), so an SMTP error used to 500 the request and
+        # leave a created-but-unreported account behind.
+        dept = Department.objects.create(dept_name="SafeMailDept")
+        subject = Subject.objects.create(sub_name="SafeMailSubject")
+        admin = User.objects.create_superuser(
+            username="mailroot", password="pw", email="mailroot@example.com",
+        )
+        self.client.force_login(admin)
+        with mock.patch(
+            "home.views.send_mail", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR"):
+                response = self.client.post("/adminDashboard", {
+                    "name": "Mail Fails", "email": "mailfails@example.com",
+                    "department": dept.pk, "subjects": [subject.pk],
+                    "password": "pw", "confirm_password": "pw",
+                })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            TeacherInfo.objects.filter(email="mailfails@example.com").exists()
+        )
+        self.assertTrue(User.objects.filter(email="mailfails@example.com").exists())

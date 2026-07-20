@@ -181,6 +181,51 @@ def text_to_pdf(text,roll, name):
 
 
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def send_mail_safely(subject, message, from_email, recipients, fail_message=None):
+    """Send mail without letting an SMTP failure break the request.
+
+    Mail is a side effect of registration, recovery and letter generation --
+    never the point of them. A misconfigured mail server should not 500 a
+    request that has already written to the database. Failures are logged so a
+    broken configuration is discoverable rather than silent.
+    """
+    try:
+        send_mail(subject, message, from_email, recipients, fail_silently=False)
+        return True
+    except Exception:
+        logger.error(
+            "%s (subject=%r, recipients=%r)",
+            fail_message or "Failed to send mail",
+            subject,
+            recipients,
+            exc_info=True,
+        )
+        return False
+
+
+def mail_admins_safely(subject, message, fail_message=None):
+    """``mail_admins`` counterpart to :func:`send_mail_safely`.
+
+    ``mail_admins`` takes no recipient list -- it targets ``settings.ADMINS`` --
+    so it cannot go through the helper above, but the failure policy is the same.
+    """
+    try:
+        mail_admins(subject, message, fail_silently=False)
+        return True
+    except Exception:
+        logger.error(
+            "%s (subject=%r, recipients=ADMINS)",
+            fail_message or "Failed to send mail to admins",
+            subject,
+            exc_info=True,
+        )
+        return False
+
 
 ### xhtml2pdf
 def final(request, *args, **kwargs):
@@ -968,12 +1013,12 @@ def checkEmail(request):
         email = request.POST.get("user_email")
         if User.objects.filter(email__exact=email).exists():
             user = User.objects.get(email__exact=email)
-            send_mail(
+            send_mail_safely(
                 "UserName ",
                 "Your username  is " + user.username,
                 "christronaldo9090909@gmail.com",
                 [email],
-                fail_silently=False,
+                fail_message="Username recovery mail failed",
             )
             messages.success(request, "Username has been sent to your gmail.")
             return redirect("loginTeacher")
@@ -1132,15 +1177,15 @@ def feedback(request):
             + str(feedback)
         )
 
-        mail_admins(
-            "Feedback", message, fail_silently=False, connection=None, html_message=None
+        mail_admins_safely(
+            "Feedback", message, fail_message="Contact-form admin notification failed"
         )
-        send_mail(
+        send_mail_safely(
             "Reply From Recoomendation Letter Team",
             "Thank you for your feedback. We will get back to you soon.",
             " christronaldo9090909@gmail.com",
             [email],
-            fail_silently=False,
+            fail_message="Contact-form reply mail failed",
         )
         messages.success(request, "Your message has been sent.")
         return render(request, "contact.html")
@@ -1743,7 +1788,7 @@ def adminDashboard(request):
             form.save_m2m()
             
             messages.success(request, 'Teacher added successfully!')
-            send_mail('Account Created Successfully', f'Dear sir,\n  Your account has been created in Recommendation Letter Generator. Your username is {uname}. Please login to verify. If you get any problem please contact us.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n \nBest Regards, \nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [teacher_info.email], fail_silently=False)
+            send_mail_safely('Account Created Successfully', f'Dear sir,\n  Your account has been created in Recommendation Letter Generator. Your username is {uname}. Please login to verify. If you get any problem please contact us.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n \nBest Regards, \nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [teacher_info.email], fail_message="Teacher account-creation mail failed")
 
 
             return redirect('adminDashboard')
