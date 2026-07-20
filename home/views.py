@@ -1619,49 +1619,56 @@ def template(request):
 
 
 def getTemplate(request):
-    if request.method == "POST":
-        content = request.POST.get("content")
-        uid = request.POST.get("uid")
-        name = request.POST.get("templateName")
-        make_default = request.POST.get("is_default") == 'on'
-        # legacy: if template is named "Default" treat as default
-        if name and name.strip().lower() == 'default':
-            make_default = True
-        teacher = TeacherInfo.objects.get(unique_id= uid)
+    if request.method != "POST":
+        return redirect("/makeTemplate")
 
-        # cleanup editor artifacts
-        content = content.replace('<p>&nbsp;</p>\n<p>&nbsp;</p>', '')
-        content = content.replace('<p>&nbsp;</p>', '')
-        content = content.replace('</p>\n<p>', '<br>')
-        content = content.replace('</p>\r\n<p>', '<br>')
-        content = content.replace('</p>\r<p>', '<br>')
-        content = content.replace('<p>', '<p><br>')
+    # Identity comes from the cookie, never from the posted ``uid`` field: a
+    # hidden input is client-controlled and could name another professor.
+    unique = request.COOKIES.get("unique")
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
 
-        # if requested as default, clear previous defaults for this prof
+    teacher = TeacherInfo.objects.get(unique_id=unique)
+    content = request.POST.get("content") or ""
+    name = request.POST.get("templateName")
+    make_default = request.POST.get("is_default") == 'on'
+    # legacy: if template is named "Default" treat as default
+    if name and name.strip().lower() == 'default':
+        make_default = True
+
+    # cleanup editor artifacts
+    content = content.replace('<p>&nbsp;</p>\n<p>&nbsp;</p>', '')
+    content = content.replace('<p>&nbsp;</p>', '')
+    content = content.replace('</p>\n<p>', '<br>')
+    content = content.replace('</p>\r\n<p>', '<br>')
+    content = content.replace('</p>\r<p>', '<br>')
+    content = content.replace('<p>', '<p><br>')
+
+    # if requested as default, clear previous defaults for this prof
+    if make_default:
+        CustomTemplates.objects.filter(professor=teacher, is_default=True).update(is_default=False)
+
+    # try to update existing template with same name
+    template_obj = CustomTemplates.objects.filter(template_name=name, professor=teacher).first()
+    if template_obj:
+        template_obj.template = content
         if make_default:
-            CustomTemplates.objects.filter(professor=teacher, is_default=True).update(is_default=False)
+            template_obj.is_default = True
+        template_obj.save()
+    else:
+        template_obj = CustomTemplates.objects.create(
+            template_name=name,
+            template=content,
+            professor=teacher,
+            is_default=make_default,
+        )
 
-        # try to update existing template with same name
-        template_obj = CustomTemplates.objects.filter(template_name=name, professor=teacher).first()
-        if template_obj:
-            template_obj.template = content
-            if make_default:
-                template_obj.is_default = True
-            template_obj.save()
-        else:
-            template_obj = CustomTemplates.objects.create(
-                template_name=name,
-                template=content,
-                professor=teacher,
-                is_default=make_default,
-            )
-
-        return render(request, "customTemplate.html", {
-            'professor': teacher,
-            'templates': CustomTemplates.objects.filter(professor=teacher),
-            'system_templates': system_templates().order_by("template_name"),
-            'template': template_obj,
-        })
+    return render(request, "customTemplate.html", {
+        'professor': teacher,
+        'templates': CustomTemplates.objects.filter(professor=teacher),
+        'system_templates': system_templates().order_by("template_name"),
+        'template': template_obj,
+    })
 
 
 @csrf_exempt

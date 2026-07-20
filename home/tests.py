@@ -2209,3 +2209,84 @@ class TemplateEditorViewTests(TestCase):
             "content": "Dear Committee", "templateName": "Fresh", "uid": "T-K",
         })
         self.assertContains(response, "Formal / Academic")
+
+
+class GetTemplateOwnershipTests(TestCase):
+    """Saving a template writes to the signed-in professor only (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof M", unique_id="T-M", email="m@example.com", department=self.dept,
+        )
+        self.victim = TeacherInfo.objects.create(
+            name="Prof N", unique_id="T-N", email="n@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-M"
+
+    def test_a_template_is_saved_to_the_signed_in_professor(self):
+        self.client.post("/getTemplate", {
+            "content": "Dear Committee", "templateName": "Mine", "uid": "T-M",
+        })
+        saved = CustomTemplates.objects.get(template_name="Mine")
+        self.assertEqual(saved.professor, self.teacher)
+
+    def test_a_forged_uid_cannot_write_to_another_professor(self):
+        self.client.post("/getTemplate", {
+            "content": "Injected", "templateName": "Forged", "uid": "T-N",
+        })
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.victim).exists())
+        self.assertTrue(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_forged_uid_cannot_clear_another_professors_default(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Their Default", template="body",
+            professor=self.victim, is_default=True,
+        )
+        self.client.post("/getTemplate", {
+            "content": "x", "templateName": "New", "is_default": "on", "uid": "T-N",
+        })
+        theirs.refresh_from_db()
+        self.assertTrue(theirs.is_default)
+
+    def test_marking_default_clears_the_previous_default(self):
+        old = CustomTemplates.objects.create(
+            template_name="Old", template="x", professor=self.teacher, is_default=True
+        )
+        self.client.post("/getTemplate", {
+            "content": "New body", "templateName": "New", "is_default": "on", "uid": "T-M",
+        })
+        old.refresh_from_db()
+        self.assertFalse(old.is_default)
+        self.assertTrue(CustomTemplates.objects.get(template_name="New").is_default)
+
+    def test_saving_the_same_name_updates_rather_than_duplicates(self):
+        self.client.post("/getTemplate", {
+            "content": "First", "templateName": "Same", "uid": "T-M",
+        })
+        self.client.post("/getTemplate", {
+            "content": "Second", "templateName": "Same", "uid": "T-M",
+        })
+        matches = CustomTemplates.objects.filter(
+            professor=self.teacher, template_name="Same"
+        )
+        self.assertEqual(matches.count(), 1)
+        self.assertIn("Second", matches.first().template)
+
+    def test_a_saved_template_never_becomes_a_system_template(self):
+        self.client.post("/getTemplate", {
+            "content": "x", "templateName": "Mine", "uid": "T-M",
+        })
+        self.assertFalse(CustomTemplates.objects.get(template_name="Mine").is_system)
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/getTemplate", {
+            "content": "x", "templateName": "y", "uid": "T-M",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_a_get_request_redirects_to_the_editor(self):
+        response = self.client.get("/getTemplate")
+        self.assertEqual(response.status_code, 302)

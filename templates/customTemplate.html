@@ -269,6 +269,8 @@ Good Luck!
       <label><input type="checkbox" name="is_default" id="is_default" /> Make this my default template</label>
     </div>
 
+    <!-- Not load-bearing: /getTemplate takes the owner from the `unique` cookie
+         and ignores this field. Kept only so older bookmarked forms still post. -->
     <input type="hidden" value="{{professor.unique_id}}" name="uid" readonly />
 
     <div class="button-container">
