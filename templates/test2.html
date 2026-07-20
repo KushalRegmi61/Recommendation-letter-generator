@@ -17,12 +17,14 @@
     <form method="post" action="/download_letter/" id="pdfForm" style="display:inline;" onsubmit="prepareEdit()">
         {% csrf_token %}
         <input type="hidden" name="roll" value="{{student.std.roll_number}}">
+        <input type="hidden" name="template_id" value="{{ template_id }}">
         <input type="hidden" name="format" value="pdf">
         <button type="submit" class="cta-add">Download as PDF</button>
     </form>
     <form method="post" action="/download_letter/" id="docxForm" style="display:inline;" onsubmit="prepareEdit()">
         {% csrf_token %}
         <input type="hidden" name="roll" value="{{student.std.roll_number}}">
+        <input type="hidden" name="template_id" value="{{ template_id }}">
         <input type="hidden" name="format" value="docx">
         <button type="submit" class="cta-add">Download as DOCX</button>
     </form>

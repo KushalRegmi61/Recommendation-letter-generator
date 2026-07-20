@@ -1,3 +1,4 @@
+import tempfile
 from datetime import date, datetime
 
 from django.contrib.auth.models import User
@@ -9,6 +10,7 @@ from django.utils import timezone
 from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo, CustomTemplates, Qualities,
+    Paper, Project, Files,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
@@ -1664,3 +1666,165 @@ class LetterExportTests(TestCase):
                 letter = render_letter(application, tpl)
                 self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))
                 self.assertTrue(build_docx_bytes(letter).startswith(b"PK"))
+
+
+class RenderCustomViewTests(TestCase):
+    """The preview renders the professor's chosen template (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof F", unique_id="T-F", email="f@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Hari Thapa", roll_number="080BCT007", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Hari Thapa", std=self.student, professor=self.teacher,
+            subjects="Networks",
+        )
+        Qualities.objects.create(application=self.application)
+        self.chosen = CustomTemplates.objects.create(
+            template_name="Chosen", template="CHOSEN for {{ app.name }}",
+            professor=self.teacher,
+        )
+        self.fallback = CustomTemplates.objects.create(
+            template_name="Fallback", template="FALLBACK", professor=self.teacher,
+            is_default=True,
+        )
+        self.client.cookies["unique"] = "T-F"
+
+    def test_the_selected_template_is_rendered(self):
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CHOSEN for Hari Thapa")
+
+    def test_without_a_selection_the_default_is_rendered(self):
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertContains(response, "FALLBACK")
+
+    def test_a_system_template_can_be_selected(self):
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": system.pk,
+        })
+        self.assertContains(response, "Hari Thapa")
+
+    def test_the_chosen_template_id_is_carried_into_the_download_form(self):
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+        })
+        self.assertContains(response, f'name="template_id" value="{self.chosen.pk}"')
+
+    def test_the_professor_anecdote_is_still_saved(self):
+        self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+            "prof_anecdote": "He rebuilt the lab router overnight.",
+        })
+        self.application.refresh_from_db()
+        self.assertEqual(
+            self.application.prof_anecdote, "He rebuilt the lab router overnight."
+        )
+
+    def test_the_quality_checkboxes_are_still_saved(self):
+        self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+            "quality1": "on", "quality2": "on", "qual": "diligent",
+        })
+        quality = Qualities.objects.get(application=self.application)
+        self.assertTrue(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertFalse(quality.social)
+        self.assertEqual(quality.quality, "diligent")
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_another_professors_student_is_not_previewable(self):
+        other = TeacherInfo.objects.create(
+            name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-G"
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_unknown_roll_is_not_found(self):
+        response = self.client.post("/renderCustom", {"roll": "NOSUCHROLL"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects_to_the_dashboard(self):
+        response = self.client.get("/renderCustom")
+        self.assertEqual(response.status_code, 302)
+
+    def test_an_application_with_no_satellite_rows_still_previews(self):
+        # The old view used .get() on six satellite models and raised
+        # DoesNotExist for a barely-filled request.
+        bare_student = StudentLoginInfo.objects.create(
+            username="Bare Student", roll_number="080BCT888", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01",
+        )
+        Application.objects.create(
+            name="Bare Student", std=bare_student, professor=self.teacher,
+        )
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT888", "template_id": self.chosen.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CHOSEN for Bare Student")
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class MakeLetterTemplateListTests(TestCase):
+    """The letter form offers system templates as well as the professor's own."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Gita Kc", roll_number="080BCT321", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Gita Kc", std=self.student, professor=self.teacher, subjects="Maths",
+        )
+        Paper.objects.create(application=self.application)
+        Project.objects.create(application=self.application)
+        University.objects.create(application=self.application, uni_name="MIT", country="USA")
+        Qualities.objects.create(application=self.application)
+        Academics.objects.create(application=self.application)
+        # formTeacher.html dereferences .url on every uploaded file unguarded,
+        # so the fixture must actually attach them or the template 500s.
+        files = Files.objects.create(application=self.application)
+        for field in ("Photo", "transcript", "CV"):
+            getattr(files, field).save(
+                f"{field}.pdf", ContentFile(b"x"), save=False
+            )
+        files.save()
+        self.teacher.images.save("prof.png", ContentFile(b"x"), save=True)
+        self.user = User.objects.create_user(username="proph", password="pw")
+        self.user.first_name = "Prof H/T-H"
+        self.user.save()
+
+    def test_the_picker_offers_system_templates(self):
+        self.client.force_login(self.user)
+        self.client.cookies["unique"] = "T-H"
+        response = self.client.post("/makeLetter", {"roll": "080BCT321"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Formal / Academic")
+
+    def test_the_picker_posts_a_template_id(self):
+        self.client.force_login(self.user)
+        self.client.cookies["unique"] = "T-H"
+        response = self.client.post("/makeLetter", {"roll": "080BCT321"})
+        self.assertContains(response, 'name="template_id"')
+        self.assertNotContains(response, 'name="temp"')
