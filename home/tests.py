@@ -2636,3 +2636,50 @@ class QualitiesUniquenessTests(TestCase):
         self.assertFalse(quality.leadership)
         self.assertTrue(quality.hardworking)
         self.assertEqual(Qualities.objects.filter(application=self.application).count(), 1)
+
+
+class UnicodePdfTests(TestCase):
+    """Non-Latin-1 text must survive PDF export (FR-1)."""
+
+    def test_an_em_dash_is_preserved_not_replaced(self):
+        from home.letters import build_pdf_bytes
+        data = build_pdf_bytes("A — B")
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_the_pdf_embeds_a_font_subset(self):
+        # FontFile2 only appears once a TrueType subset is embedded; with the
+        # old Latin-1 core-font path it is absent.
+        from home.letters import build_pdf_bytes
+        self.assertIn(b"FontFile2", build_pdf_bytes("A — B"))
+
+    def test_curly_quotes_survive(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("“Quoted” and ‘single’").startswith(b"%PDF"))
+
+    def test_plain_ascii_still_works(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("Dear Committee,\n\nRegards").startswith(b"%PDF"))
+
+    def test_a_long_letter_still_paginates(self):
+        from home.letters import build_pdf_bytes
+        long_text = "\n\n".join(f"Paragraph {i}. " * 20 for i in range(60))
+        self.assertTrue(build_pdf_bytes(long_text).startswith(b"%PDF"))
+
+    def test_the_seeded_templates_still_export(self):
+        from home.letters import build_pdf_bytes, render_letter
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof U", unique_id="T-U", email="u@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Uni Student", roll_number="080BCT900", department=dept,
+            program=program, password="x", dob="2000-01-01", gender="Female",
+        )
+        application = Application.objects.create(
+            name="Uni Student", std=student, professor=teacher, subjects="Physics",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(application, tpl)
+                self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))

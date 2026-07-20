@@ -141,10 +141,16 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ### Admin
 - Manage programs, departments, teachers, templates, and all application data via `/admin/`.
 
-> **Note on PDF export.** The PDF writer only supports Latin-1 characters. The starter templates
-> are plain ASCII for this reason. Characters outside Latin-1 — em dashes, curly quotes, or a name
-> written in Devanagari — are replaced with `?` in the PDF. The DOCX export is unaffected and
-> renders them correctly.
+> **Note on PDF export.** Letters are rendered with an embedded DejaVu Sans subset
+> (`static/fonts/dejavu/DejaVuSans.ttf`), so accented Latin, Greek and Cyrillic text — along with
+> em dashes and curly quotes — exports correctly. **Devanagari is not covered by this font**, and
+> a Devanagari name will come out as blank/tofu boxes rather than readable text. Supporting it
+> needs both a Devanagari-capable TTF added to `static/fonts/` with `_UNICODE_FONT_PATH` in
+> `home/letters.py` pointed at it, *and* a PDF engine that performs complex text shaping — `fpdf`
+> 1.7.2 does not reorder matras or form conjuncts, so a Devanagari font alone is not sufficient.
+> If the font file is missing entirely the exporter falls back to Latin-1 and replaces
+> unsupported characters with `?`. The DOCX export has never had this limitation and renders
+> any script correctly.
 
 ---
 

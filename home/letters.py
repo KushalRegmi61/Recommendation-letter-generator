@@ -6,11 +6,14 @@ Nothing here touches ``request``. Views in ``home/views.py`` supply an
 
 import datetime
 import io
+import os
 import re
 
+import fpdf as _fpdf_module
 from docx import Document
 from fpdf import FPDF
 
+from django.conf import settings
 from django.db.models import Q
 from jinja2 import TemplateError
 from jinja2.sandbox import SandboxedEnvironment
@@ -201,23 +204,47 @@ def build_docx_bytes(letter_text):
     return buffer.getvalue()
 
 
-def build_pdf_bytes(letter_text):
-    """Render ``letter_text`` to PDF bytes.
+# fpdf's core fonts are Latin-1 only, which turns a non-Latin name into "???".
+# A TrueType font registered with uni=True embeds a subset and handles Unicode.
+# DejaVu Sans covers Latin (incl. accents), Greek and Cyrillic, plus punctuation
+# such as em dashes and curly quotes. It does NOT cover Devanagari - see README.
+_UNICODE_FONT_PATH = os.path.join(
+    settings.BASE_DIR, "static", "fonts", "dejavu", "DejaVuSans.ttf"
+)
+_UNICODE_FONT_FAMILY = "DejaVu"
 
-    ``fpdf`` only speaks latin-1. Seeded templates are ASCII, but a professor
-    may paste a curly quote into their own template, so unsupported characters
-    are replaced rather than allowed to abort the download.
-    """
+# ``add_font(uni=True)`` defaults to caching parsed font metrics as a ``.pkl``
+# written next to the ``.ttf`` (FPDF_CACHE_MODE 0), which fails on a read-only
+# deployment. Mode 2 would relocate it to FPDF_CACHE_DIR, but that reintroduces
+# ``pickle.load`` from a shared temp directory - an arbitrary-code-execution
+# sink if that directory is writable by anyone else. Mode 1 disables the cache
+# outright: no writes, no unpickling, at the cost of re-parsing the TTF per
+# document, which is a few milliseconds against a request that already renders
+# a template and streams a file.
+_fpdf_module.fpdf.FPDF_CACHE_MODE = 1
+
+
+def build_pdf_bytes(letter_text):
+    """Render ``letter_text`` to PDF bytes with a Unicode-capable font."""
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    if os.path.exists(_UNICODE_FONT_PATH):
+        pdf.add_font(_UNICODE_FONT_FAMILY, "", _UNICODE_FONT_PATH, uni=True)
+        pdf.set_font(_UNICODE_FONT_FAMILY, size=12)
+        encode = lambda line: line
+    else:
+        # Degrade rather than fail if the font is missing from the deployment.
+        pdf.set_font("Arial", size=12)
+        encode = lambda line: line.encode("latin-1", "replace").decode("latin-1")
     for block in letter_text.split("\n\n"):
         for line in block.split("\n"):
-            safe = line.encode("latin-1", "replace").decode("latin-1")
-            pdf.multi_cell(0, 10, safe)
+            pdf.multi_cell(0, 10, encode(line))
         pdf.ln(5)
     output = pdf.output(dest="S")
-    # fpdf1 returns str, fpdf2 returns bytes/bytearray.
+    # fpdf1 returns str, fpdf2 returns bytes/bytearray. fpdf1 holds the whole
+    # document - embedded font subset included - as a latin-1 "binary string"
+    # and does exactly this encode itself when writing to a file, so it is
+    # lossless here and cannot raise, even with a TTF embedded.
     if isinstance(output, str):
         return output.encode("latin-1")
     return bytes(output)
