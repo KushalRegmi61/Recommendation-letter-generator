@@ -666,3 +666,80 @@ class TeacherDashboardViewTests(TestCase):
         self.assertEqual(
             response.context["filter_options"]["countries"], ["Finland", "USA"]
         )
+
+    def test_filter_bar_is_rendered_with_typeable_comboboxes(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, 'name="department"')
+        self.assertContains(response, 'name="country"')
+        self.assertContains(response, 'name="college"')
+        # Each field is an <input list=...> backed by a <datalist> of suggestions,
+        # so the professor can either pick a value or type a partial one.
+        self.assertContains(response, 'list="country-options"')
+        self.assertContains(response, '<datalist id="country-options">')
+        self.assertContains(response, '<option value="Finland">')
+        self.assertContains(response, '<option value="MIT">')
+
+    def test_active_filter_value_is_kept_in_the_box(self):
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertContains(response, 'value="USA"')
+
+    def test_partially_typed_filter_value_still_matches(self):
+        response = self.client.get("/teacher", {"country": "us"})
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_search_box_is_rendered_and_keeps_its_value(self):
+        response = self.client.get("/teacher", {"q": "dan usa"})
+        self.assertContains(response, 'name="q"')
+        self.assertContains(response, 'value="dan usa"')
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_generated_table_has_tracking_columns(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, "Generated on")
+        self.assertContains(response, "Template")
+
+    def test_empty_state_distinguishes_no_requests_from_no_matches(self):
+        # No filter and nothing pending -> the cheerful global message.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/teacher")
+        self.assertContains(response, "You have no request for now")
+
+        # A filter that matches nothing must NOT claim there are no requests at all.
+        Application.objects.filter(professor=self.prof).update(is_generated=False)
+        response = self.client.get("/teacher", {"country": "Antarctica"})
+        self.assertContains(response, "No pending requests match")
+        self.assertNotContains(response, "You have no request for now")
+
+    def test_generated_count_is_shown(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["generated_count"], 0)
+
+    def test_dashboard_never_shows_another_professors_students(self):
+        other_dept = Department.objects.create(dept_name="BEX")
+        other_prog = Program.objects.create(
+            program_name="BE-BEX", department=other_dept,
+        )
+        other_prof = TeacherInfo.objects.create(
+            unique_id="T999", name="Prof Nine", email="p9@example.com",
+            department=other_dept,
+        )
+        other_stu = StudentLoginInfo.objects.create(
+            username="zoe", roll_number="080BEX099", department=other_dept,
+            program=other_prog, password="x", dob="2000-01-01",
+        )
+        secret = Application.objects.create(
+            name="zoe secret", email="z@example.com", professor=other_prof,
+            std=other_stu, is_generated=False,
+        )
+        University.objects.create(
+            uni_name="SecretU", country="Japan", application=secret,
+        )
+
+        response = self.client.get("/teacher")
+        self.assertNotContains(response, "zoe secret")
+        # Nor may the other professor's values leak into the filter suggestions.
+        self.assertNotIn("Japan", response.context["filter_options"]["countries"])
+        self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
+        self.assertNotIn("BEX", response.context["filter_options"]["departments"])
