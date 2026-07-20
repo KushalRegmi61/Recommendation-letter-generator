@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 import os
 from pathlib import Path
 from django.contrib.messages import constants as messages
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -59,6 +60,27 @@ CSRF_TRUSTED_ORIGINS = env_list(
     "DJANGO_CSRF_TRUSTED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000",
 )
+
+
+def check_production_config(debug, secret_key, allowed_hosts):
+    """Refuse to run with development defaults once DEBUG is off."""
+    if debug:
+        return
+    if not secret_key or secret_key == DEV_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a real value when DJANGO_DEBUG is "
+            "false. Generate one with: python -c \"from "
+            "django.core.management.utils import get_random_secret_key; "
+            "print(get_random_secret_key())\""
+        )
+    if "*" in allowed_hosts:
+        raise ImproperlyConfigured(
+            "ALLOWED_HOSTS must not contain '*' when DJANGO_DEBUG is false. "
+            "Set DJANGO_ALLOWED_HOSTS to the hostnames you actually serve."
+        )
+
+
+check_production_config(DEBUG, SECRET_KEY, ALLOWED_HOSTS)
 
 #admin
 ADMINS = [('admin', 'recoioe@gmail.com')]

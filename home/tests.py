@@ -3596,3 +3596,54 @@ class SecuritySettingsTests(TestCase):
         from auth.settings import DEBUG as CONFIGURED_DEBUG
         self.assertEqual(dj.SESSION_COOKIE_SECURE, not CONFIGURED_DEBUG)
         self.assertEqual(dj.CSRF_COOKIE_SECURE, not CONFIGURED_DEBUG)
+
+
+class ProductionGuardTests(TestCase):
+    """Running with DEBUG off and a default secret must fail loudly."""
+
+    def test_the_guard_function_exists(self):
+        from auth.settings import check_production_config
+        self.assertTrue(callable(check_production_config))
+
+    def test_it_rejects_the_dev_secret_key_when_debug_is_off(self):
+        from auth.settings import DEV_SECRET_KEY, check_production_config
+        with self.assertRaises(Exception) as ctx:
+            check_production_config(
+                debug=False, secret_key=DEV_SECRET_KEY, allowed_hosts=["example.com"],
+            )
+        self.assertIn("DJANGO_SECRET_KEY", str(ctx.exception))
+
+    def test_it_rejects_an_empty_secret_key_when_debug_is_off(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception):
+            check_production_config(
+                debug=False, secret_key="", allowed_hosts=["example.com"],
+            )
+
+    def test_it_rejects_a_wildcard_host_when_debug_is_off(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception) as ctx:
+            check_production_config(
+                debug=False, secret_key="a-real-key", allowed_hosts=["*"],
+            )
+        self.assertIn("ALLOWED_HOSTS", str(ctx.exception))
+
+    def test_a_wildcard_mixed_with_real_hosts_is_still_rejected(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception):
+            check_production_config(
+                debug=False, secret_key="a-real-key",
+                allowed_hosts=["example.com", "*"],
+            )
+
+    def test_it_permits_a_correct_production_configuration(self):
+        from auth.settings import check_production_config
+        check_production_config(
+            debug=False, secret_key="a-real-key", allowed_hosts=["example.com"],
+        )
+
+    def test_it_permits_anything_in_development(self):
+        from auth.settings import DEV_SECRET_KEY, check_production_config
+        check_production_config(
+            debug=True, secret_key=DEV_SECRET_KEY, allowed_hosts=["*"],
+        )
