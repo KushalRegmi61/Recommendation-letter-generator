@@ -168,13 +168,20 @@ in the output are expected, not failures. Look at the final `OK`.
 
 ## Email / SMTP
 
-Email (OTP and notifications) uses Gmail SMTP configured in `auth/settings.py`. If you hit an
-SMTP authentication error, generate a Gmail **App Password** for a valid account and set
-`EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` in `auth/settings.py`.
+Email (OTP and notifications) uses Gmail SMTP. Credentials come from the environment —
+set `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` in your `.env` (or as real environment
+variables in production) using a Gmail **App Password**, not the account password.
 
-> **Security note:** `auth/settings.py` currently contains a committed `SECRET_KEY`,
-> `DEBUG = True`, `ALLOWED_HOSTS = ['*']`, and email credentials. Rotate these and move them
-> to environment variables before deploying anywhere public.
+With those unset, mail simply does not send. Every call site routes through
+`send_mail_safely` / `mail_admins_safely`, which log an SMTP failure at ERROR level rather
+than letting it break a request that has already written to the database — so registration
+and letter generation still work without mail configured.
+
+> **Security note:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and the email credentials now come
+> from the environment (see [Deployment](#deployment)), and the app refuses to start with
+> development defaults when `DJANGO_DEBUG=false`. **The credentials previously committed to this
+> repository remain in git history and must be rotated** — removing them from the current files
+> does not un-publish them.
 
 ---
 
