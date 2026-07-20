@@ -1577,3 +1577,90 @@ class RenderLetterTests(TestCase):
         from jinja2 import TemplateError
         from jinja2.sandbox import SecurityError
         self.assertTrue(issubclass(SecurityError, TemplateError))
+
+
+class LetterExportTests(TestCase):
+    """PDF/DOCX bytes are produced from letter text (FR-1)."""
+
+    def test_pdf_bytes_look_like_a_pdf(self):
+        from home.letters import build_pdf_bytes
+        data = build_pdf_bytes("Dear Committee,\n\nRegards,\nProf")
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_docx_bytes_look_like_a_zip(self):
+        # .docx is a zip container; PK is the zip magic number.
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("Dear Committee,\n\nRegards,\nProf")
+        self.assertTrue(data.startswith(b"PK"))
+
+    def test_docx_keeps_one_paragraph_per_block(self):
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("First block.\n\nSecond block.")
+        doc = Document(io.BytesIO(data))
+        texts = [p.text for p in doc.paragraphs]
+        self.assertIn("First block.", texts)
+        self.assertIn("Second block.", texts)
+
+    def test_docx_preserves_the_letter_text(self):
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("Dear Committee,\n\nI recommend her warmly.")
+        doc = Document(io.BytesIO(data))
+        joined = "\n".join(p.text for p in doc.paragraphs)
+        self.assertIn("I recommend her warmly.", joined)
+
+    def test_empty_text_still_produces_a_file(self):
+        from home.letters import build_docx_bytes, build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("").startswith(b"%PDF"))
+        self.assertTrue(build_docx_bytes("").startswith(b"PK"))
+
+    def test_non_latin1_characters_are_replaced_not_crashed(self):
+        # fpdf encodes latin-1; an em dash used to raise UnicodeEncodeError.
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("A — B").startswith(b"%PDF"))
+
+    def test_curly_quotes_do_not_crash_the_pdf(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("“Quoted” and ‘single’").startswith(b"%PDF"))
+
+    def test_docx_handles_non_latin1_characters_natively(self):
+        # Only the PDF path is latin-1 limited; docx is XML/UTF-8.
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("A — B")
+        doc = Document(io.BytesIO(data))
+        self.assertIn("—", "\n".join(p.text for p in doc.paragraphs))
+
+    def test_a_long_letter_paginates_without_error(self):
+        from home.letters import build_pdf_bytes
+        long_text = "\n\n".join(f"Paragraph number {i}. " * 20 for i in range(60))
+        self.assertTrue(build_pdf_bytes(long_text).startswith(b"%PDF"))
+
+    def test_a_very_long_unbroken_word_does_not_hang(self):
+        # multi_cell can loop forever on a token wider than the cell.
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("A" * 500).startswith(b"%PDF"))
+
+    def test_the_seeded_templates_export_end_to_end(self):
+        from home.letters import build_docx_bytes, build_pdf_bytes, render_letter
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof X", unique_id="T-X", email="x@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Export Student", roll_number="080BCT600", department=dept,
+            program=program, password="x", dob="2000-01-01", gender="Female",
+        )
+        application = Application.objects.create(
+            name="Export Student", std=student, professor=teacher, subjects="Physics",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(application, tpl)
+                self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))
+                self.assertTrue(build_docx_bytes(letter).startswith(b"PK"))

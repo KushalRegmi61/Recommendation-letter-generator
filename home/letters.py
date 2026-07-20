@@ -5,6 +5,10 @@ Nothing here touches ``request``. Views in ``home/views.py`` supply an
 """
 
 import datetime
+import io
+
+from docx import Document
+from fpdf import FPDF
 
 from django.db.models import Q
 from jinja2 import TemplateError
@@ -179,3 +183,35 @@ def available_templates(teacher):
     return CustomTemplates.objects.filter(visible_to(teacher)).order_by(
         "-is_default", "is_system", "template_name"
     )
+
+
+def build_docx_bytes(letter_text):
+    """Render ``letter_text`` to .docx bytes, one paragraph per blank-line block."""
+    document = Document()
+    for block in letter_text.split("\n\n"):
+        document.add_paragraph(block)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def build_pdf_bytes(letter_text):
+    """Render ``letter_text`` to PDF bytes.
+
+    ``fpdf`` only speaks latin-1. Seeded templates are ASCII, but a professor
+    may paste a curly quote into their own template, so unsupported characters
+    are replaced rather than allowed to abort the download.
+    """
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    for block in letter_text.split("\n\n"):
+        for line in block.split("\n"):
+            safe = line.encode("latin-1", "replace").decode("latin-1")
+            pdf.multi_cell(0, 10, safe)
+        pdf.ln(5)
+    output = pdf.output(dest="S")
+    # fpdf1 returns str, fpdf2 returns bytes/bytearray.
+    if isinstance(output, str):
+        return output.encode("latin-1")
+    return bytes(output)
