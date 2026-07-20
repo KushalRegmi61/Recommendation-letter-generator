@@ -1896,7 +1896,6 @@ from jinja2 import Template
 import datetime
 from fpdf import FPDF
 
-@csrf_exempt
 def download_generated(request):
     """Re-serve the letter stored on an Application (FR-5).
 
@@ -1906,10 +1905,16 @@ def download_generated(request):
     back to the dashboard with an explanation instead of 500-ing.
     """
     unique = request.COOKIES.get("unique")
-    application_id = request.GET.get("id")
-    if not unique or not application_id:
-        # A missing id would otherwise reach the ORM as pk=None and blow up.
-        raise Http404("Not signed in as a professor, or no letter requested.")
+    if not unique:
+        raise Http404("Not signed in as a professor.")
+
+    # A missing or non-numeric id would otherwise reach the ORM and raise
+    # ValueError, which surfaces as a 500 (and a debug traceback when
+    # DEBUG is on) rather than an ordinary not-found.
+    try:
+        application_id = int(request.GET.get("id", ""))
+    except (TypeError, ValueError):
+        raise Http404("No valid letter requested.")
 
     application = get_object_or_404(
         Application, pk=application_id, professor__unique_id=unique
@@ -1929,6 +1934,7 @@ def download_generated(request):
     )
 
 
+@csrf_exempt
 def download_letter(request):
     if request.method == 'POST':
         roll = request.POST.get('roll')

@@ -800,3 +800,9 @@ class DownloadGeneratedTests(TestCase):
     def test_missing_id_parameter_is_not_served(self):
         response = self.client.get("/download_generated/")
         self.assertEqual(response.status_code, 404)
+
+    def test_malformed_id_is_not_served(self):
+        for bad in ("abc", "1 OR 1=1", "5.0", ""):
+            with self.subTest(bad=bad):
+                response = self.client.get(f"/download_generated/?id={bad}")
+                self.assertEqual(response.status_code, 404)
