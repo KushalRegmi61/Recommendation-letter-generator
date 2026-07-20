@@ -50,6 +50,7 @@ urlpatterns = [
     path('renderCustom', views.renderCustom, name='renderCustom'),
     path('makeTemplate', views.template, name='templateTest'),
     path('getTemplate', views.getTemplate, name='getTemplate'),
+    path('duplicateTemplate', views.duplicate_template, name='duplicateTemplate'),
     path('loginAdmin', views.admin_login, name='admin_login'),
     path('adminDashboard', views.adminDashboard, name='adminDashboard'),
     

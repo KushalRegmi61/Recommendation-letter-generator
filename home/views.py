@@ -14,6 +14,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.contrib.auth import logout, authenticate, login
 from django.contrib.auth.forms import AuthenticationForm
+from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from .forms import TeacherInfoForm
 from django.contrib import messages
@@ -117,7 +118,7 @@ from home.forms import StudentForm
 from home.dashboard import build_teacher_dashboard_context
 from home.letters import (
     available_templates, build_docx_bytes, build_pdf_bytes,
-    render_letter, select_template,
+    render_letter, select_template, system_templates, visible_to,
 )
 
 def text_to_pdf(text,roll, name):
@@ -1652,7 +1653,46 @@ def getTemplate(request):
 
         templates = CustomTemplates.objects.filter(professor=teacher)
         return render(request, "customTemplate.html", {'professor': teacher, 'templates': templates, 'template': template_obj})
-    
+
+
+@csrf_exempt
+def duplicate_template(request):
+    """Copy a system (or own) template into this professor's editable library (FR-3)."""
+    if request.method != "POST":
+        return redirect("/makeTemplate")
+
+    unique = request.COOKIES.get("unique")
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
+
+    teacher = TeacherInfo.objects.get(unique_id=unique)
+    try:
+        template_id = int(request.POST.get("template_id", ""))
+    except (TypeError, ValueError):
+        raise Http404("No valid template requested.")
+
+    # Only shared system templates and the professor's own may be copied.
+    source = get_object_or_404(
+        CustomTemplates.objects.filter(visible_to(teacher)), pk=template_id
+    )
+
+    base_name = f"{source.template_name} (copy)"
+    name = base_name
+    suffix = 2
+    while CustomTemplates.objects.filter(professor=teacher, template_name=name).exists():
+        name = f"{base_name} {suffix}"
+        suffix += 1
+
+    CustomTemplates.objects.create(
+        template_name=name,
+        template=source.template,
+        professor=teacher,
+        is_default=False,
+        is_system=False,
+    )
+    messages.success(request, f'Copied "{source.template_name}" into your templates.')
+    return redirect("/makeTemplate")
+
 
 def admin_login(request):
     try:

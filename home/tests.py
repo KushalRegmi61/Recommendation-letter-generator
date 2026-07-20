@@ -2068,3 +2068,87 @@ class DownloadLetterTests(TestCase):
                     is_generated and has_timestamp,
                     "a save persisted the stored letter before its metadata",
                 )
+
+
+class DuplicateTemplateTests(TestCase):
+    """A professor can copy a system template into their own library (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof I", unique_id="T-I", email="i@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof J", unique_id="T-J", email="j@example.com", department=self.dept,
+        )
+        self.system = CustomTemplates.objects.filter(is_system=True).first()
+        self.client.cookies["unique"] = "T-I"
+
+    def test_duplicating_creates_an_owned_editable_copy(self):
+        response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.assertEqual(response.status_code, 302)
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(copy.template, self.system.template)
+        self.assertFalse(copy.is_system)
+        self.assertFalse(copy.is_default)
+
+    def test_the_copy_is_named_after_the_original(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(copy.template_name, f"{self.system.template_name} (copy)")
+
+    def test_duplicating_twice_does_not_collide(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        names = list(
+            CustomTemplates.objects.filter(professor=self.teacher)
+            .values_list("template_name", flat=True)
+        )
+        self.assertEqual(len(names), 2)
+        self.assertEqual(len(set(names)), 2)
+
+    def test_the_original_system_template_is_untouched(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.system.refresh_from_db()
+        self.assertTrue(self.system.is_system)
+        self.assertIsNone(self.system.professor)
+
+    def test_a_professor_may_duplicate_their_own_template(self):
+        mine = CustomTemplates.objects.create(
+            template_name="Mine", template="body", professor=self.teacher
+        )
+        self.client.post("/duplicateTemplate", {"template_id": mine.pk})
+        self.assertEqual(
+            CustomTemplates.objects.filter(professor=self.teacher).count(), 2
+        )
+
+    def test_another_professors_template_cannot_be_duplicated(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="secret", professor=self.other
+        )
+        response = self.client.post("/duplicateTemplate", {"template_id": theirs.pk})
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_malformed_id_is_not_served(self):
+        for bad in ("abc", "", "-1", "999999"):
+            with self.subTest(value=bad):
+                response = self.client.post("/duplicateTemplate", {"template_id": bad})
+                self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects_to_the_editor(self):
+        response = self.client.get("/duplicateTemplate")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_copy_is_immediately_selectable_for_generation(self):
+        from home.letters import select_template
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(select_template(self.teacher, copy.pk), copy)
