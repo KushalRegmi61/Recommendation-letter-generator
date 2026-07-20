@@ -2699,3 +2699,49 @@ class RemovedEndpointTests(TestCase):
     def test_the_testing_view_is_gone(self):
         from home import views
         self.assertFalse(hasattr(views, "testing"))
+
+
+class TeacherUserLinkTests(TestCase):
+    """TeacherInfo links to a Django User by FK, not by a name-string convention."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+
+    def test_a_teacher_can_be_linked_to_a_user(self):
+        user = User.objects.create_user(username="linked", password="pw")
+        teacher = TeacherInfo.objects.create(
+            name="Prof Linked", unique_id="T-LINK", email="l@example.com",
+            department=self.dept, user=user,
+        )
+        self.assertEqual(teacher.user, user)
+        self.assertEqual(user.teacherinfo, teacher)
+
+    def test_the_link_is_optional(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof Unlinked", unique_id="T-UNLINK", email="u@example.com",
+            department=self.dept,
+        )
+        self.assertIsNone(teacher.user)
+
+    def test_one_user_cannot_be_two_teachers(self):
+        from django.db.utils import IntegrityError
+        user = User.objects.create_user(username="solo", password="pw")
+        TeacherInfo.objects.create(
+            name="A", unique_id="T-A1", email="a@example.com",
+            department=self.dept, user=user,
+        )
+        with self.assertRaises(IntegrityError):
+            TeacherInfo.objects.create(
+                name="B", unique_id="T-B1", email="b@example.com",
+                department=self.dept, user=user,
+            )
+
+    def test_deleting_the_user_does_not_delete_the_teacher(self):
+        user = User.objects.create_user(username="doomed", password="pw")
+        teacher = TeacherInfo.objects.create(
+            name="Prof Doomed", unique_id="T-DOOM", email="d@example.com",
+            department=self.dept, user=user,
+        )
+        user.delete()
+        teacher.refresh_from_db()
+        self.assertIsNone(teacher.user)
