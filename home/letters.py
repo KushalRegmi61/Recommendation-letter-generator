@@ -6,6 +6,32 @@ Nothing here touches ``request``. Views in ``home/views.py`` supply an
 
 import datetime
 
+from django.db.models import Q
+from jinja2 import TemplateError
+from jinja2.sandbox import SandboxedEnvironment
+
+# Professors author these templates themselves, so the renderer is sandboxed:
+# plain ``jinja2.Template`` allows ``__class__``/``__subclasses__`` walking,
+# which is the standard springboard to running code as the web user.
+_JINJA = SandboxedEnvironment()
+
+
+def visible_to(teacher):
+    """Q matching the templates ``teacher`` may use: their own, plus shared ones.
+
+    A system template is by definition *unowned* - that is what migration 0013
+    seeds. Matching on ``is_system`` alone would let a row that is both owned
+    and flagged system leak from its owner to every other professor.
+    """
+    return Q(professor=teacher) | Q(professor__isnull=True, is_system=True)
+
+
+def system_templates():
+    """The shared, unowned starter library."""
+    from home.models import CustomTemplates
+
+    return CustomTemplates.objects.filter(professor__isnull=True, is_system=True)
+
 PRONOUNS = {
     "male": ("He", "him", "His"),
     "female": ("She", "her", "Her"),
@@ -87,3 +113,69 @@ def build_letter_context(application):
         ),
         "today": datetime.date.today().strftime("%B %d, %Y"),
     }
+
+
+def select_template(teacher, template_id=None):
+    """Resolve which template to render for ``teacher``.
+
+    ``template_id`` arrives straight from POST data, so it may be ``None``, an
+    empty string, or junk. Anything unusable falls through to the professor's
+    default rather than raising.
+    """
+    from home.models import CustomTemplates
+
+    try:
+        pk = int(template_id)
+    except (TypeError, ValueError):
+        pk = None
+
+    if pk is not None:
+        # A professor may pick their own template or any shared system one,
+        # never another professor's.
+        chosen = CustomTemplates.objects.filter(pk=pk).filter(
+            visible_to(teacher)
+        ).first()
+        if chosen:
+            return chosen
+
+    # ``professor=teacher`` is load-bearing: without it a colleague's default
+    # at a lower pk would be returned instead of this professor's.
+    default = CustomTemplates.objects.filter(
+        professor=teacher, is_default=True
+    ).first()
+    if default:
+        return default
+
+    return system_templates().order_by("template_name").first()
+
+
+def render_letter(application, template_obj):
+    """Render ``template_obj`` against ``application``. No template -> empty text.
+
+    Professors author these templates by hand, so a saved template may be
+    malformed or reference a field that does not exist. A broken template
+    renders as empty text rather than raising, matching the convention that a
+    missing row is an omitted paragraph and never a 500.
+    """
+    if not template_obj or not template_obj.template:
+        return ""
+    try:
+        return _JINJA.from_string(template_obj.template).render(
+            build_letter_context(application)
+        )
+    except TemplateError:
+        # Covers syntax errors, undefined attributes and sandbox violations,
+        # which all subclass ``TemplateError``.
+        return ""
+
+
+def available_templates(teacher):
+    """Every template ``teacher`` may generate from: theirs plus system ones."""
+    from home.models import CustomTemplates
+
+    # No ``.distinct()`` needed, unlike ``filters.py``: both arms of the OR test
+    # columns on this table only, so Django emits a bare WHERE with no join and
+    # cannot return a row twice.
+    return CustomTemplates.objects.filter(visible_to(teacher)).order_by(
+        "-is_default", "is_system", "template_name"
+    )

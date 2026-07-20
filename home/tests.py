@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
@@ -1307,3 +1308,272 @@ class LetterContextTests(TestCase):
                 self.assertNotIn("having taught", letter)
                 self.assertNotIn("I taught", letter)
                 self.assertNotIn(" in .", letter)
+
+
+class TemplateSelectionTests(TestCase):
+    """select_template resolves a professor's pick, default, then system (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof C", unique_id="T-C", email="c@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof D", unique_id="T-D", email="d@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Mine", template="mine", professor=self.teacher
+        )
+        self.my_default = CustomTemplates.objects.create(
+            template_name="My Default", template="default",
+            professor=self.teacher, is_default=True,
+        )
+        self.theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="theirs", professor=self.other
+        )
+
+    def test_an_explicit_own_template_wins(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, self.mine.pk), self.mine)
+
+    def test_a_system_template_may_be_selected(self):
+        from home.letters import select_template
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.assertEqual(select_template(self.teacher, system.pk), system)
+
+    def test_another_professors_template_is_refused(self):
+        from home.letters import select_template
+        # Falls back to this professor's default rather than leaking Prof D's.
+        self.assertEqual(select_template(self.teacher, self.theirs.pk), self.my_default)
+
+    def test_no_choice_uses_the_professors_default(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, None), self.my_default)
+
+    def test_blank_and_malformed_ids_use_the_default(self):
+        from home.letters import select_template
+        for bad in ("", "   ", "abc", None, "0", "-1", "9999999"):
+            with self.subTest(value=bad):
+                self.assertEqual(select_template(self.teacher, bad), self.my_default)
+
+    def test_string_ids_from_post_data_work(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, str(self.mine.pk)), self.mine)
+
+    def test_without_a_default_it_falls_back_to_a_system_template(self):
+        from home.letters import select_template
+        CustomTemplates.objects.filter(professor=self.teacher).delete()
+        chosen = select_template(self.teacher, None)
+        self.assertTrue(chosen.is_system)
+
+    def test_with_nothing_at_all_it_returns_none(self):
+        from home.letters import select_template
+        CustomTemplates.objects.all().delete()
+        self.assertIsNone(select_template(self.teacher, None))
+
+    def test_another_professors_default_is_not_used_as_mine(self):
+        from home.letters import select_template
+        CustomTemplates.objects.create(
+            template_name="Their Default", template="secret",
+            professor=self.other, is_default=True,
+        )
+        self.assertEqual(select_template(self.teacher, None), self.my_default)
+
+    def test_without_my_own_default_i_get_a_system_template_not_theirs(self):
+        from home.letters import select_template
+        CustomTemplates.objects.create(
+            template_name="Their Default", template="secret",
+            professor=self.other, is_default=True,
+        )
+        CustomTemplates.objects.filter(professor=self.teacher).delete()
+        chosen = select_template(self.teacher, None)
+        self.assertTrue(chosen.is_system)
+        self.assertIsNone(chosen.professor)
+
+    def test_an_owned_row_flagged_system_cannot_exist(self):
+        # The leak this closes: such a row would satisfy the ``is_system`` arm
+        # and so be visible to every professor. The DB constraint makes it
+        # unrepresentable, so there is nothing for the query to leak.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CustomTemplates.objects.create(
+                    template_name="Hybrid", template="secret",
+                    professor=self.other, is_system=True,
+                )
+
+    def test_the_system_arm_of_the_predicate_requires_an_unowned_row(self):
+        # Defence in depth behind the constraint above: even if the constraint
+        # were dropped, the query must not match an owned row flagged system.
+        from home.letters import visible_to
+        system_arm = [
+            child for child in visible_to(self.teacher).children
+            if hasattr(child, "children")
+        ]
+        self.assertEqual(len(system_arm), 1)
+        self.assertIn(("professor__isnull", True), system_arm[0].children)
+
+
+class AvailableTemplateTests(TestCase):
+    """available_templates lists what a professor may generate from (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof C2", unique_id="T-C2", email="c2@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof D2", unique_id="T-D2", email="d2@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Mine", template="mine", professor=self.teacher
+        )
+        self.theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="theirs", professor=self.other
+        )
+
+    def test_own_templates_are_included(self):
+        from home.letters import available_templates
+        self.assertIn(self.mine, available_templates(self.teacher))
+
+    def test_system_templates_are_included(self):
+        from home.letters import available_templates
+        names = {t.template_name for t in available_templates(self.teacher)}
+        self.assertIn("Formal / Academic", names)
+
+    def test_another_professors_templates_are_excluded(self):
+        from home.letters import available_templates
+        self.assertNotIn(self.theirs, available_templates(self.teacher))
+
+    def test_no_template_appears_twice(self):
+        from home.letters import available_templates
+        results = list(available_templates(self.teacher))
+        self.assertEqual(len(results), len({t.pk for t in results}))
+
+    def test_the_default_sorts_first(self):
+        from home.letters import available_templates
+        self.mine.is_default = True
+        self.mine.save()
+        self.assertEqual(available_templates(self.teacher).first(), self.mine)
+
+    def test_it_returns_a_queryset_that_can_be_filtered(self):
+        # ``make_letter`` chains .filter(is_default=True) onto this.
+        from home.letters import available_templates
+        self.mine.is_default = True
+        self.mine.save()
+        self.assertEqual(
+            available_templates(self.teacher).filter(is_default=True).first(), self.mine
+        )
+
+    def test_an_owned_row_flagged_system_is_excluded(self):
+        from home.letters import available_templates
+        # Same leak as in TemplateSelectionTests, via the listing rather than
+        # the picker. The constraint blocks the row outright.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CustomTemplates.objects.create(
+                    template_name="Hybrid", template="secret",
+                    professor=self.other, is_system=True,
+                )
+        self.assertNotIn(self.theirs, available_templates(self.teacher))
+
+
+class RenderLetterTests(TestCase):
+    """render_letter fills the chosen template with application data (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof E", unique_id="T-E", email="e@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Sita Rai", roll_number="080BCT001", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Sita Rai", std=self.student, professor=self.teacher,
+            subjects="Physics",
+        )
+        # A default whose body differs from every template under test, so that
+        # "the chosen body is used" cannot pass by silently falling back here.
+        self.default = CustomTemplates.objects.create(
+            template_name="Default", template="DEFAULT-BODY-NOT-CHOSEN",
+            professor=self.teacher, is_default=True,
+        )
+
+    def test_the_chosen_template_body_is_used(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Terse", template="Hello {{ app.name }} from {{ teacher.name }}.",
+            professor=self.teacher,
+        )
+        self.assertEqual(
+            render_letter(self.application, tpl), "Hello Sita Rai from Prof E."
+        )
+
+    def test_pronouns_reach_the_template(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="P", template="{{ pronoun }} and {{ pronoun_obj }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "She and her")
+
+    def test_no_template_renders_empty(self):
+        from home.letters import render_letter
+        self.assertEqual(render_letter(self.application, None), "")
+
+    def test_a_template_with_an_empty_body_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Blank", template="", professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_every_seeded_system_template_renders(self):
+        from home.letters import render_letter
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(self.application, tpl)
+                self.assertIn("Sita Rai", letter)
+                self.assertIn("Prof E", letter)
+                self.assertNotIn("None", letter)
+
+    def test_a_template_with_broken_syntax_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Broken", template="{% for x in y %}no endfor",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_a_template_referencing_a_missing_field_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Undefined", template="{{ app.nonexistent.attr }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_sandbox_escape_attempts_are_refused(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Escape", template="{{ ''.__class__.__mro__ }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_the_subclass_walk_springboard_is_refused(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Springboard",
+            template="{{ app.std.__class__.__mro__[1].__subclasses__()|length }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_a_sandbox_violation_raises_a_template_error(self):
+        # ``render_letter`` relies on SecurityError subclassing TemplateError.
+        from jinja2 import TemplateError
+        from jinja2.sandbox import SecurityError
+        self.assertTrue(issubclass(SecurityError, TemplateError))

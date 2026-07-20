@@ -251,3 +251,16 @@ class CustomTemplates(models.Model):
 
     class Meta:
         db_table = 'Template'
+        constraints = [
+            # A template is either shared and unowned, or owned and private.
+            # An owned row flagged ``is_system`` would be visible to every
+            # professor through the ``is_system`` arm of the selection query,
+            # leaking one professor's template to all the others.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(is_system=True, professor__isnull=True)
+                    | models.Q(is_system=False, professor__isnull=False)
+                ),
+                name="template_system_xor_owned",
+            ),
+        ]
