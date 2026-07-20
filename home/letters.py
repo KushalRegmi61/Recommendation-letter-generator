@@ -6,6 +6,7 @@ Nothing here touches ``request``. Views in ``home/views.py`` supply an
 
 import datetime
 import io
+import re
 
 from docx import Document
 from fpdf import FPDF
@@ -51,6 +52,11 @@ STRENGTH_PHRASES = {
     "strong": "with great enthusiasm",
 }
 DEFAULT_STRENGTH_PHRASE = "with great enthusiasm"
+
+# python-docx rejects NULL and C0 control characters outright; strip them
+# rather than 500 on text a professor pasted from another document.
+# Tab (\x09), newline (\x0a) and carriage return (\x0d) are legal XML and kept.
+_DOCX_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
 def join_subjects(parts):
@@ -189,7 +195,7 @@ def build_docx_bytes(letter_text):
     """Render ``letter_text`` to .docx bytes, one paragraph per blank-line block."""
     document = Document()
     for block in letter_text.split("\n\n"):
-        document.add_paragraph(block)
+        document.add_paragraph(_DOCX_ILLEGAL.sub("", block))
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()

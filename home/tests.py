@@ -1,3 +1,4 @@
+import os
 import tempfile
 from datetime import date, datetime
 
@@ -1828,3 +1829,242 @@ class MakeLetterTemplateListTests(TestCase):
         response = self.client.post("/makeLetter", {"roll": "080BCT321"})
         self.assertContains(response, 'name="template_id"')
         self.assertNotContains(response, 'name="temp"')
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class DownloadLetterTests(TestCase):
+    """Exporting a letter stores it and stamps the tracking fields (FR-1/FR-5)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Gita Kc", roll_number="080BCT099", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Gita Kc", std=self.student, professor=self.teacher, subjects="Signals",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="Export", template="EXPORTED for {{ app.name }}",
+            professor=self.teacher,
+        )
+        self.client.cookies["unique"] = "T-G"
+
+    def _post(self, **extra):
+        payload = {"roll": "080BCT099", "format": "pdf", "template_id": self.tpl.pk}
+        payload.update(extra)
+        return self.client.post("/download_letter/", payload)
+
+    def test_pdf_download_returns_a_pdf(self):
+        response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_docx_download_returns_a_docx(self):
+        response = self._post(format="docx")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("wordprocessingml", response["Content-Type"])
+
+    def test_generation_stamps_the_tracking_fields(self):
+        self._post()
+        self.application.refresh_from_db()
+        self.assertTrue(self.application.is_generated)
+        self.assertIsNotNone(self.application.generated_at)
+        self.assertEqual(self.application.generated_template, self.tpl)
+        self.assertTrue(self.application.generated_letter)
+
+    def test_the_stored_file_is_the_downloaded_file(self):
+        response = self._post()
+        self.application.refresh_from_db()
+        with self.application.generated_letter.open("rb") as handle:
+            self.assertEqual(handle.read(), response.content)
+
+    def test_the_chosen_template_is_used_not_the_default(self):
+        CustomTemplates.objects.create(
+            template_name="My Default", template="DEFAULT-BODY",
+            professor=self.teacher, is_default=True,
+        )
+        response = self._post(format="docx")
+        import io
+        from docx import Document
+        text = "\n".join(p.text for p in Document(io.BytesIO(response.content)).paragraphs)
+        self.assertIn("EXPORTED for Gita Kc", text)
+        self.assertNotIn("DEFAULT-BODY", text)
+
+    def test_edited_text_is_used_instead_of_the_template(self):
+        response = self._post(format="docx", edited_letter="HAND WRITTEN VERSION")
+        import io
+        from docx import Document
+        texts = [p.text for p in Document(io.BytesIO(response.content)).paragraphs]
+        self.assertIn("HAND WRITTEN VERSION", texts)
+        self.assertNotIn("EXPORTED for Gita Kc", texts)
+
+    def test_the_edited_text_is_what_gets_stored(self):
+        self._post(format="docx", edited_letter="HAND WRITTEN VERSION")
+        self.application.refresh_from_db()
+        import io
+        from docx import Document
+        with self.application.generated_letter.open("rb") as handle:
+            texts = [p.text for p in Document(io.BytesIO(handle.read())).paragraphs]
+        self.assertIn("HAND WRITTEN VERSION", texts)
+
+    def test_regenerating_replaces_the_stored_file_and_timestamp(self):
+        self._post()
+        self.application.refresh_from_db()
+        first_at = self.application.generated_at
+        self._post(format="docx")
+        self.application.refresh_from_db()
+        self.assertGreaterEqual(self.application.generated_at, first_at)
+        self.assertTrue(self.application.generated_letter.name.endswith(".docx"))
+
+    def test_the_stored_letter_is_servable_by_download_generated(self):
+        # Phase 2 built this endpoint; Task 7 is what finally gives it a file.
+        self._post()
+        # The view stamped the row; this instance predates that write.
+        self.application.refresh_from_db()
+        response = self.client.get(f"/download_generated/?id={self.application.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            self.application.generated_letter.open("rb").read(),
+        )
+
+    def test_another_professor_cannot_export_this_letter(self):
+        TeacherInfo.objects.create(
+            name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-H"
+        self.assertEqual(self._post().status_code, 404)
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self._post()
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_an_unknown_format_is_rejected(self):
+        self.assertEqual(self._post(format="txt").status_code, 400)
+
+    def test_a_rejected_format_does_not_stamp_anything(self):
+        self._post(format="txt")
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_a_missing_roll_is_not_found(self):
+        response = self.client.post("/download_letter/", {"format": "pdf"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects(self):
+        self.assertEqual(self.client.get("/download_letter/").status_code, 302)
+
+    def test_a_seeded_system_template_exports_and_stamps(self):
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self._post(template_id=system.pk)
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.generated_template, system)
+        self.assertTrue(self.application.generated_letter)
+
+    def test_the_filename_is_safe_for_an_awkward_name(self):
+        self.application.name = "Gita / Kc \"the best\""
+        self.application.save()
+        response = self._post()
+        disposition = response["Content-Disposition"]
+        self.assertNotIn("/", disposition.split("filename=")[1])
+
+    def test_a_broken_template_is_refused_and_stamps_nothing(self):
+        broken = CustomTemplates.objects.create(
+            template_name="Broken", template="{% if %}oops", professor=self.teacher,
+        )
+        response = self._post(template_id=broken.pk)
+        self.assertEqual(response.status_code, 302)
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertIsNone(self.application.generated_template)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_a_whitespace_only_template_is_refused_and_stamps_nothing(self):
+        blank = CustomTemplates.objects.create(
+            template_name="Blank", template="   \n\n  ", professor=self.teacher,
+        )
+        response = self._post(template_id=blank.pk)
+        self.assertEqual(response.status_code, 302)
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertIsNone(self.application.generated_template)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_control_characters_in_edited_text_do_not_crash_the_docx(self):
+        import io
+        from docx import Document
+        for label, char in (
+            ("null", "\x00"), ("vtab", "\x0b"), ("formfeed", "\x0c"), ("bell", "\x07"),
+        ):
+            with self.subTest(label):
+                response = self._post(
+                    format="docx", edited_letter=f"BEFORE{char}AFTER",
+                )
+                self.assertEqual(response.status_code, 200)
+                texts = [
+                    p.text for p in Document(io.BytesIO(response.content)).paragraphs
+                ]
+                self.assertIn("BEFOREAFTER", texts)
+
+    def test_tabs_and_newlines_survive_the_control_character_strip(self):
+        import io
+        from docx import Document
+        response = self._post(format="docx", edited_letter="A\tB\nC\x00D")
+        texts = [p.text for p in Document(io.BytesIO(response.content)).paragraphs]
+        self.assertIn("A\tB\nCD", texts)
+
+    # Its own MEDIA_ROOT: the class-level one is created once at import time and
+    # shared by every method, and the filesystem is not rolled back between
+    # tests, so counting files there would count other tests' exports too.
+    @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+    def test_re_exporting_leaves_only_one_stored_file(self):
+        self._post()
+        self._post(format="docx")
+        self._post()
+        self.application.refresh_from_db()
+        stored = self.application.generated_letter
+        directory = os.path.dirname(stored.path)
+        self.assertEqual(os.listdir(directory), [os.path.basename(stored.name)])
+        # The surviving file must be the one the row points at, and be servable.
+        self.assertTrue(stored.storage.exists(stored.name))
+
+    def test_no_save_ever_persists_a_letter_without_its_metadata(self):
+        # ``save=False`` on the FileField write is load-bearing: it defers that
+        # write into the same UPDATE as the metadata. Without it, FieldFile.save
+        # issues its own UPDATE first, and any failure after that point leaves a
+        # torn row -- a live Re-download link with no timestamp or template, which
+        # the dashboard renders as em-dashes beside a working download.
+        from unittest.mock import patch
+        original_save = Application.save
+        snapshots = []
+
+        def record(instance, *args, **kwargs):
+            snapshots.append((
+                bool(instance.generated_letter),
+                instance.is_generated,
+                instance.generated_at is not None,
+            ))
+            return original_save(instance, *args, **kwargs)
+
+        with patch.object(Application, "save", record):
+            self._post()
+
+        self.assertTrue(snapshots, "the view never saved the application")
+        for has_file, is_generated, has_timestamp in snapshots:
+            if has_file:
+                self.assertTrue(
+                    is_generated and has_timestamp,
+                    "a save persisted the stored letter before its metadata",
+                )

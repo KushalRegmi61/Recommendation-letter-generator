@@ -4,6 +4,9 @@ from django.db.models.fields import DateTimeField
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.sessions.models import Session
+from django.core.files.base import ContentFile
+from django.utils import timezone
+from django.utils.text import slugify
 
 # check old password and new password
 from django.contrib.auth.hashers import make_password, check_password
@@ -1812,164 +1815,78 @@ def download_generated(request):
 
 @csrf_exempt
 def download_letter(request):
-    if request.method == 'POST':
-        roll = request.POST.get('roll')
-        file_format = request.POST.get('format')
-        # professors may edit the generated letter; if they submit edited text use it directly
-        edited_text = request.POST.get('edited_letter')
+    """Export a letter as PDF/DOCX, store a copy, and record the FR-5 tracking fields."""
+    if request.method != "POST":
+        return redirect("/teacher")
 
-        if edited_text:
-            rendered_letter = edited_text
-        else:
-            unique = request.COOKIES.get('unique')
-            # Fetch all context data as in renderCustom
-            application = Application.objects.get(std__roll_number=roll, professor__unique_id=unique)
-            paper = Paper.objects.get(application=application)
-            project = Project.objects.get(application=application)
-            university = University.objects.get(application=application)
-            quality = Qualities.objects.get(application=application)
-            academics = Academics.objects.get(application=application)
-            teacher_model = application.professor
-            files = Files.objects.get(application=application)
-            bisaya = application.subjects
-            subjec = bisaya.split(',')
-            subjects = subjec[:-1]
-            subject = subjec[-1]
-            name = application.name
-            fname = name.split(' ')
-            firstname = fname[0]
-            length = len(subjec)
-            value = True if length == 1 else False
-            # pronouns and related helper values
-            gender = application.std.gender or ''
-            if gender.lower() == 'male':
-                pronoun = 'He'; pronoun_obj = 'him'; pronoun_pos = 'His'
-            elif gender.lower() == 'female':
-                pronoun = 'She'; pronoun_obj = 'her'; pronoun_pos = 'Her'
-            else:
-                pronoun = 'They'; pronoun_obj = 'them'; pronoun_pos = 'Their'
-            rel_desc = 'teacher'
-            # simple strength phrase default
-            strength_phrase = 'with great enthusiasm'
-            # deadline formatted
-            deadline = university.uni_deadline.strftime("%B %d, %Y") if university.uni_deadline else ''
-            # alias for compatibility with template
-            app = application
-            # Template selection logic (reuse from renderCustom)
-            # prefer the template marked as default first
-            template_obj = CustomTemplates.objects.filter(professor=teacher_model, is_default=True).first()
-            if not template_obj:
-                template_obj = CustomTemplates.objects.filter(template_name__iexact='Default', professor=teacher_model).first()
-            if not template_obj:
-                # same long default template used in renderCustom
-                default_template_content = """
-{{ today }}
-{% if university.uni_name %}
-Admissions Committee
-{% if university.program_applied %}{{ university.program_applied }} Program
-{% endif %} {{ university.uni_name }}
-{% else %}
-To Whom It May Concern
-{% endif %}
-Re: Letter of Recommendation for {{ app.name }}{% if university.program_applied %} — {{ university.program_applied }}{% endif %}{% if university.uni_name %} at {{ university.uni_name }}{% endif %}
-{# ── PARAGRAPH 1 · Introduction & relationship ── #}
+    unique = request.COOKIES.get("unique")
+    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+        return redirect("/loginTeacher")
 
-It is my distinct pleasure to recommend {{ app.name }}{% if app.name|slice("-1") != "." %},{% endif %} a student in the {{ app.std.program.program_name }} program, Department of {{ app.std.department.dept_name }}, at the Institute of Engineering, Pulchowk Campus, Tribhuvan University. I have had the privilege of knowing {{ app.name }} in my capacity as {{ pronoun_pos|lower }} {{ rel_desc }} {% if app.years_taught %} for {% if app.years_taught == 1 %}one academic year{% else %}{{ app.years_taught }} academic years{% endif %} {% endif %} {% if app.subjects %} , during which I taught {{ pronoun_obj|lower }} in {{ app.subjects }}{% if app.language_instruction %} (taught in {{ app.language_instruction }}){% endif %}. {% else %} . {% endif %} In this time, {{ pronoun|lower }} has consistently stood out as one of the most capable and driven students I have encountered throughout my academic career.
-{# ── PARAGRAPH 2 · Academic performance ── #} {% if academics.gpa or academics.tentative_ranking or app.ranking_percentile or app.class_size %}
+    file_format = request.POST.get("format")
+    if file_format not in ("pdf", "docx"):
+        # Reject before touching the database so a bad request stamps nothing.
+        return HttpResponse("Invalid format", status=400)
 
-Academically, {{ app.name }} has demonstrated outstanding performance throughout {{ pronoun_pos|lower }} studies. {% if academics.gpa %} {{ pronoun|lower }} has maintained a cumulative GPA of {{ academics.gpa }} {% if app.class_size and academics.tentative_ranking %} , ranking {{ academics.tentative_ranking }} out of {{ app.class_size }} students in the program {% elif academics.tentative_ranking %} , placing {{ pronoun_obj|lower }} at rank {{ academics.tentative_ranking }} {% endif %} {% if app.ranking_percentile %} — within the top {{ app.ranking_percentile }}% of the cohort {% endif %}. {% elif app.class_size and academics.tentative_ranking %} {{ pronoun|lower }} ranks {{ academics.tentative_ranking }} out of {{ app.class_size }} students in the department. {% elif app.ranking_percentile %} {{ pronoun|lower }} falls within the top {{ app.ranking_percentile }}% of the program. {% endif %} This level of achievement reflects not merely intellectual aptitude, but a genuine commitment to rigorous scholarship and academic discipline.
-{% endif %} {# ── PARAGRAPH 3 · Research & paper ── #} {% if app.is_paper and paper.paper_title %}
+    application = get_object_or_404(
+        Application,
+        std__roll_number=request.POST.get("roll"),
+        professor__unique_id=unique,
+    )
+    template_obj = select_template(application.professor, request.POST.get("template_id"))
 
-Beyond the classroom, {{ app.name }} has made meaningful contributions to academic research. {{ pronoun|lower }} co-authored the paper titled "{{ paper.paper_title }}"{% if paper.paper_link %}, available at {{ paper.paper_link }}{% endif %}, which is a testament to {{ pronoun_pos|lower }} ability to engage with original inquiry, synthesise complex findings, and contribute substantively to scholarly discourse. I was directly involved in supervising this work and can attest to the intellectual rigour and dedication {{ pronoun|lower }} brought to every stage of the research process.
-{% endif %} {# ── PARAGRAPH 4 · Project work ── #} {% if project.supervised_project or project.final_project %}
+    # A professor may hand-edit the preview; their text wins over the template.
+    edited_text = request.POST.get("edited_letter")
+    letter_text = edited_text if edited_text else render_letter(application, template_obj)
+    # ``render_letter`` returns "" when the template fails to compile. Refuse
+    # rather than storing a blank file and stamping the row as generated: the
+    # dashboard would otherwise assert success for a letter that does not exist.
+    if not letter_text.strip():
+        messages.error(
+            request, "That template could not be rendered. Check it for errors."
+        )
+        return redirect("/teacher")
 
-{{ app.name }} has also demonstrated strong applied engineering competence through {{ pronoun_pos|lower }} project work. {% if project.supervised_project %} Under my direct supervision, {{ pronoun|lower }} successfully completed the project titled "{{ project.supervised_project }}", which required advanced technical knowledge and an ability to translate theoretical concepts into practical solutions. {% endif %} {% if project.final_project %} {{ pronoun_pos|lower }} final-year project, "{{ project.final_project }}", further showcased {{ pronoun_pos|lower }} engineering acumen and problem-solving capabilities. {% endif %} {% if project.deployed %} Notably, {{ pronoun_pos|lower }} work was successfully deployed in a real-world environment — a distinction that underscores both the quality and practical viability of {{ pronoun_pos|lower }} contribution. {% endif %}
-{% endif %} {# ── PARAGRAPH 5 · Internship ── #} {% if app.intern %}
+    if file_format == "docx":
+        payload = build_docx_bytes(letter_text)
+        content_type = (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        )
+    else:
+        payload = build_pdf_bytes(letter_text)
+        content_type = "application/pdf"
 
-In addition to {{ pronoun_pos|lower }} academic pursuits, {{ app.name }} undertook a professional internship {% if app.intern_company %}at {{ app.intern_company }}{% endif %} {% if app.intern_role %}, serving as a {{ app.intern_role }}{% endif %} {% if app.intern_duration %} for {{ app.intern_duration }}{% endif %}. {% if app.intern_outcome %} {{ pronoun|lower }} {{ app.intern_outcome }}, demonstrating a capacity to apply academic knowledge in professional, high-pressure settings and to deliver measurable results. {% else %} This experience allowed {{ pronoun_obj|lower }} to complement {{ pronoun_pos|lower }} technical education with practical industry exposure, further preparing {{ pronoun_obj|lower }} for the demands of advanced study and professional practice. {% endif %}
-{% endif %} {# ── PARAGRAPH 6 · Qualities & character ── #} {% if quality %}
+    safe_name = slugify(application.name) or "letter"
+    filename = f"Recommendation_{safe_name}.{file_format}"
 
-What distinguishes {{ app.name }} beyond {{ pronoun_pos|lower }} academic and technical accomplishments is {{ pronoun_pos|lower }} character and disposition.  {% if quality.leadership %} {{ pronoun|lower }} has consistently exhibited strong leadership, {% if quality.teamwork %}paired with a genuine talent for collaboration and teamwork,{% endif %} {% if quality.hardworking %}alongside an unwavering work ethic{% endif %}. {% elif quality.hardworking %} {{ pronoun|lower }} is exceptionally hardworking and {% if quality.teamwork %}an outstanding team player{% endif %}. {% elif quality.teamwork %} {{ pronoun|lower }} excels as a team player, consistently elevating the performance of those around {{ pronoun_obj|lower }}. {% endif %} {% if quality.friendly and quality.social %} {{ pronoun_pos|lower }} warm, approachable nature and social awareness make {{ pronoun_obj|lower }} a positive presence in any collaborative environment. {% elif quality.friendly %} {{ pronoun_pos|lower }} approachable and collegial manner makes {{ pronoun_obj|lower }} easy to work with at every level. {% endif %} {% if quality.presentation %} {{ pronoun|lower }} has also shown a notable ability in {{ quality.presentation }}. {% endif %} {% if quality.quality %} Colleagues and peers frequently remark on {{ pronoun_pos|lower }} {{ quality.quality }}. {% endif %}
-{% endif %} {# ── PARAGRAPH 7 · Extracurricular & awards ── #} {% if quality.extracirricular or app.scholarships or app.competitions_won %}
+    # FR-5: record what was generated so the dashboard can list and re-serve it.
+    # ``save=False`` defers the FileField write into the single UPDATE below, so
+    # a failure cannot leave a stored file on a row with no timestamp.
+    previous = application.generated_letter.name
+    storage = application.generated_letter.storage
+    application.generated_letter.save(filename, ContentFile(payload), save=False)
 
-{{ app.name }}'s contributions extend well beyond academic coursework. {% if quality.extracirricular %} {{ pronoun|lower }} has been an active participant in {{ quality.extracirricular }}, demonstrating initiative and a commitment to holistic personal development. {% endif %} {% if app.scholarships %} {{ pronoun_pos|lower }} academic excellence has been formally recognised through {{ app.scholarships }}. {% endif %} {% if app.competitions_won %} Furthermore, {{ pronoun|lower }} has achieved distinction in {{ app.competitions_won }}, reflecting both competitive aptitude and the ability to perform under pressure. {% endif %}
-{% endif %} {# ── PARAGRAPH 8 · Professor's personal anecdote (optional, added later) ── #} {% if app.prof_anecdote %}
+    # Re-exporting otherwise orphans the superseded file forever. Only once the
+    # replacement is safely written, and never at the cost of the export: the
+    # old file may already be gone, or be shared by a row we are not looking at.
+    if previous and previous != application.generated_letter.name:
+        try:
+            storage.delete(previous)
+        except OSError:
+            pass
 
-I would like to share a particular instance that encapsulates the qualities I have described above. {{ app.prof_anecdote }}
-{% endif %} {# ── PARAGRAPH 9 · Personal statement tie-in ── #} {% if app.personal_statement %}
+    application.generated_template = template_obj
+    application.generated_at = timezone.now()
+    application.is_generated = True
+    application.save()
 
-Having reviewed {{ app.name }}'s personal statement, I can affirm that the motivations and aspirations expressed therein align precisely with what I have observed firsthand. {{ pronoun_pos }} intellectual curiosity, clarity of purpose, and commitment to {{ pronoun_pos|lower }} field are evident in everything {{ pronoun|lower }} undertakes.
-{% endif %} {# ── PARAGRAPH 10 · Closing recommendation ── #} {% if university.program_applied and university.uni_name %} for the {{ university.program_applied }} program at {{ university.uni_name }}. {% elif university.program_applied %} for the {{ university.program_applied }} program. {% elif app.recommendation_purpose %} for {{ app.recommendation_purpose }}. {% else %} for further graduate study and professional advancement. {% endif %} {{ pronoun|lower }} possesses the intellectual capacity, personal integrity, and professional maturity to excel in a demanding academic environment and to make meaningful contributions to {{ pronoun_pos|lower }} chosen field. I am fully confident that {{ pronoun|lower }} will prove to be an asset to any institution fortunate enough to admit {{ pronoun_obj|lower }}.
-{# ── PARAGRAPH 11 · Contact ── #}
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
-Should you require any additional information or wish to discuss {{ app.name }}'s qualifications further, please do not hesitate to contact me directly at {{ teacher.email }} {% if teacher.phone %}or by telephone at {{ teacher.phone }}{% endif %}. I shall be happy to assist in any way I can.
 
-Yours sincerely,
-{% if teacher.images %} Professor {{ teacher.name }} {% endif %}
 
-{{ teacher.name }}
-
-{{ teacher.title }}{% if teacher.designation %}, {{ teacher.designation }}{% endif %}
-Department of {{ teacher.department.dept_name }}
-Institute of Engineering, Pulchowk Campus
-Tribhuvan University, Nepal
-{% if teacher.office_address %}Office: {{ teacher.office_address }}
-{% endif %} {% if teacher.phone %}Tel: {{ teacher.phone }}
-{% endif %} {{ teacher.email }}
-{% if deadline %}
-
-Application Deadline: {{ deadline }}
-{% endif %} 
-"""
-                jinja_template = Template(default_template_content)
-            else:
-                jinja_template = Template(template_obj.template)
-            context = {
-                "student": application,
-                'app': app,
-                'subjects': subjects,
-                'subject': subject,
-                'value': value,
-                'firstname': firstname,
-                "paper": paper,
-                "project": project,
-                "university": university,
-                "quality": quality,
-                "academics": academics,
-                "teacher": teacher_model,
-                "files": files,
-                "today": datetime.date.today().strftime("%B %d, %Y"),
-                'pronoun': pronoun,
-                'pronoun_obj': pronoun_obj,
-                'pronoun_pos': pronoun_pos,
-                'rel_desc': rel_desc,
-                'strength_phrase': strength_phrase,
-                'deadline': deadline,
-            }
-            rendered_letter = jinja_template.render(context)
-
-        if file_format == 'docx':
-            doc = Document()
-            for paragraph in rendered_letter.split('\n\n'):
-                doc.add_paragraph(paragraph)
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-            response['Content-Disposition'] = f'attachment; filename=Recommendation_{application.name}.docx'
-            doc.save(response)
-            return response
-        elif file_format == 'pdf':
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            for paragraph in rendered_letter.split('\n\n'):
-                for line in paragraph.split('\n'):
-                    pdf.multi_cell(0, 10, line)
-                pdf.ln(5)
-            pdf_bytes = pdf.output(dest='S').encode('latin1')
-            response = HttpResponse(pdf_bytes, content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename=Recommendation_{application.name}.pdf'
-            return response
-        else:
-            return HttpResponse("Invalid format", status=400)
 def registerProfessor(request):
     if request.method == 'POST':
         form = TeacherInfoForm(request.POST, request.FILES)
