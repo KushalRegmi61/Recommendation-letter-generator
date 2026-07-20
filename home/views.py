@@ -1,5 +1,6 @@
 import datetime
 import os
+from django.db import transaction
 from django.db.models.fields import DateTimeField
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -835,22 +836,15 @@ def studentform2(request):
         file_info.save()
 
         qualities_info = Qualities(
-            # leadership = True if leaders == "on" else False,
-            # hardworking = True if hardwork == "on" else False,
-            # social = True if social == "on" else False,
-            # teamwork = True if teamwork == "on" else False,
-            # friendly =True if friendly == "on" else False,
-            # quality = quality,
-            # presentation = presentation,
             extracirricular = extra,
             application = info ,
         )
-        
-        if Qualities.objects.filter(application = info ).exists():
-            quality = Qualities.objects.get(application = info )
-            quality.delete()
-            
-        qualities_info.save()
+
+        # Delete-then-recreate must be atomic: a failure between the two used to
+        # leave the application permanently without a Qualities row.
+        with transaction.atomic():
+            Qualities.objects.filter(application=info).delete()
+            qualities_info.save()
 
         send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
 
@@ -1585,15 +1579,20 @@ def renderCustom(request):
         application.prof_anecdote = anecdote
         application.save()
 
-    Qualities.objects.filter(application=application).update(
-        leadership=request.POST.get("quality1") == "on",
-        hardworking=request.POST.get("quality2") == "on",
-        social=request.POST.get("quality3") == "on",
-        teamwork=request.POST.get("quality4") == "on",
-        friendly=request.POST.get("quality5") == "on",
-        quality=request.POST.get("qual"),
-        presentation=request.POST.get("presentation"),
-        recommend=request.POST.get("recommend"),
+    # ``update_or_create`` rather than ``filter().update()``: an application with
+    # no Qualities row would silently discard everything the professor ticked.
+    Qualities.objects.update_or_create(
+        application=application,
+        defaults={
+            "leadership": request.POST.get("quality1") == "on",
+            "hardworking": request.POST.get("quality2") == "on",
+            "social": request.POST.get("quality3") == "on",
+            "teamwork": request.POST.get("quality4") == "on",
+            "friendly": request.POST.get("quality5") == "on",
+            "quality": request.POST.get("qual"),
+            "presentation": request.POST.get("presentation"),
+            "recommend": request.POST.get("recommend"),
+        },
     )
 
     template_obj = select_template(application.professor, request.POST.get("template_id"))

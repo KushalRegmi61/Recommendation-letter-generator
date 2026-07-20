@@ -2451,3 +2451,67 @@ class DashboardTemplateLinkTests(TestCase):
         response = self.client.get("/teacher")
         self.assertContains(response, "My Favourite")
         self.assertNotContains(response, "starter template")
+
+
+class QualityPersistenceTests(TestCase):
+    """The professor's checkbox input must survive a missing Qualities row."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof P", unique_id="T-P", email="p@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Quality Student", roll_number="080BCT770", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Quality Student", std=self.student, professor=self.teacher,
+            subjects="Networks",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="Q", template="{{ app.name }}", professor=self.teacher,
+        )
+        self.client.cookies["unique"] = "T-P"
+
+    def _post(self, **extra):
+        payload = {"roll": "080BCT770", "template_id": self.tpl.pk}
+        payload.update(extra)
+        return self.client.post("/renderCustom", payload)
+
+    def test_qualities_are_saved_when_no_row_exists_yet(self):
+        # This is the data-loss case: .update() on an empty queryset is a silent no-op.
+        self.assertFalse(Qualities.objects.filter(application=self.application).exists())
+        self._post(quality1="on", quality2="on", qual="diligent")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertTrue(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertFalse(quality.social)
+        self.assertEqual(quality.quality, "diligent")
+
+    def test_qualities_are_updated_when_a_row_already_exists(self):
+        Qualities.objects.create(application=self.application, leadership=True)
+        self._post(quality2="on", qual="thorough")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertFalse(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertEqual(quality.quality, "thorough")
+
+    def test_no_duplicate_qualities_row_is_created(self):
+        self._post(quality1="on")
+        self._post(quality2="on")
+        self.assertEqual(
+            Qualities.objects.filter(application=self.application).count(), 1
+        )
+
+    def test_an_existing_extracurricular_value_is_preserved(self):
+        # ``extracirricular`` comes from the student's intake form and is not
+        # part of the professor's checkbox set; updating must not clear it.
+        Qualities.objects.create(
+            application=self.application, extracirricular="Robotics club",
+        )
+        self._post(quality1="on")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertEqual(quality.extracirricular, "Robotics club")
+        self.assertTrue(quality.leadership)
