@@ -917,7 +917,8 @@ def loginTeacher(request):
 
                 context = build_teacher_dashboard_context(unique, request.GET)
                 response = render(request, "Teacher.html", context)
-                response.set_cookie("unique", unique)
+                # The "unique" cookie is no longer issued: identity resolves from
+                # the session via current_teacher().
                 response.set_cookie("username", user.username)
                 return response
             else:
@@ -930,6 +931,8 @@ def loginTeacher(request):
 def logoutUser(request):
     logout(request)
     response = redirect("/")
+    # Kept even though login no longer sets it, so browsers still holding the
+    # retired cookie from an earlier release get it cleared on logout.
     response.delete_cookie('unique')
     response.delete_cookie('csrftoken')
     response.delete_cookie('username')

@@ -3117,3 +3117,33 @@ class StudentPasswordChangeAuthTests(TestCase):
         })
         self.student.refresh_from_db()
         self.assertTrue(check_password("new-pw", self.student.password))
+
+
+class UniqueCookieRetiredTests(TestCase):
+    """The unique cookie is no longer issued."""
+
+    def test_views_no_longer_read_the_unique_cookie(self):
+        import inspect
+        from home import views
+        source = inspect.getsource(views)
+        self.assertNotIn('COOKIES.get("unique")', source)
+        self.assertNotIn("COOKIES.get('unique')", source)
+
+    def test_login_does_not_set_a_unique_cookie(self):
+        dept = Department.objects.create(dept_name="BCT")
+        teacher = TeacherInfo.objects.create(
+            name="Prof RC", unique_id="T-RC", email="rc@example.com", department=dept,
+        )
+        user = User.objects.create_user(
+            username="rc", password="pw", email="rc@example.com"
+        )
+        user.first_name = "Prof RC/T-RC"
+        user.save()
+        teacher.user = user
+        teacher.save()
+        # loginTeacher's POST field is "username", but it holds the email.
+        response = self.client.post("/loginTeacher", {
+            "username": "rc@example.com", "password": "pw",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("unique", response.cookies)
