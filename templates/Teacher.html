@@ -138,6 +138,8 @@
   {% comment %} display current default template if exists (provided by view) {% endcomment %}
   {% if default_template %}
   <h4>Current default template: <em>{{ default_template.template_name }}</em></h4>
+  {% else %}
+  <h4>No default template yet. Duplicate a starter template to get going.</h4>
   {% endif %}
   <h2>Manage Templates:</h2>
   <a href="/makeTemplate" class="btn btn-primary">Create / Edit Templates</a>

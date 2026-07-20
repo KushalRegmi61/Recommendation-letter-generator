@@ -2417,3 +2417,32 @@ class NoHardcodedTemplatesTests(TestCase):
     def test_the_letter_bodies_come_from_the_database(self):
         # The three system templates are the only shipped letter bodies now.
         self.assertEqual(CustomTemplates.objects.filter(is_system=True).count(), 3)
+
+
+class DashboardTemplateLinkTests(TestCase):
+    """The dashboard points professors at the template library (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-O"
+
+    def test_the_dashboard_links_to_the_template_editor(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/makeTemplate")
+
+    def test_a_professor_with_no_default_is_told_about_the_starter_library(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, "starter template")
+
+    def test_a_professor_with_a_default_sees_its_name(self):
+        CustomTemplates.objects.create(
+            template_name="My Favourite", template="body",
+            professor=self.teacher, is_default=True,
+        )
+        response = self.client.get("/teacher")
+        self.assertContains(response, "My Favourite")
+        self.assertNotContains(response, "starter template")
