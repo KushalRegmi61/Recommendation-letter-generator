@@ -172,10 +172,12 @@ Email (OTP and notifications) uses Gmail SMTP. Credentials come from the environ
 set `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` in your `.env` (or as real environment
 variables in production) using a Gmail **App Password**, not the account password.
 
-With those unset, mail simply does not send. Every call site routes through
-`send_mail_safely` / `mail_admins_safely`, which log an SMTP failure at ERROR level rather
-than letting it break a request that has already written to the database — so registration
-and letter generation still work without mail configured.
+With those unset, mail simply does not send — no request fails because of it. The four sites
+that previously raised on an SMTP error (username recovery, both contact-form sends, and
+teacher account creation) now route through `send_mail_safely` / `mail_admins_safely`, which
+log the failure at ERROR level instead of breaking a request that has already written to the
+database. Three notification sends (letter generated, new application, OTP) still use Django's
+`fail_silently=True` directly, so they degrade quietly but log nothing.
 
 > **Security note:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and the email credentials now come
 > from the environment (see [Deployment](#deployment)), and the app refuses to start with
