@@ -1,8 +1,9 @@
 import datetime
 import os
+from django.db import transaction
 from django.db.models.fields import DateTimeField
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.sessions.models import Session
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -14,9 +15,9 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.contrib.auth import logout, authenticate, login
 from django.contrib.auth.forms import AuthenticationForm
-from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from .forms import TeacherInfoForm
+from home.identity import current_teacher, current_student, set_student_cookie
 from django.contrib import messages
 import random
 import uuid
@@ -56,10 +57,9 @@ def index(request):
     
     #check if the user is logged in or not
     if request.method == "GET":                                                     #if logged in 
-        naam = request.COOKIES.get('student')      
-        
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -92,10 +92,9 @@ def index(request):
         #             },
         #         )
             # return response
-        uid = request.COOKIES.get('unique')            
-        print("teacher " + str(uid))                         #if not student then might be teacher
-        if TeacherInfo.objects.filter(unique_id__exact=uid).exists():
-                unique = request.COOKIES.get('unique')                              #teacher's unique id (see schema diagram)
+        teacher = current_teacher(request)                   #if not student then might be teacher
+        if teacher is not None:
+                unique = teacher.unique_id                                          #teacher's unique id (see schema diagram)
 
 
                 # generate teachers home page
@@ -181,13 +180,61 @@ def text_to_pdf(text,roll, name):
 
 
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def send_mail_safely(subject, message, from_email, recipients, fail_message=None):
+    """Send mail without letting an SMTP failure break the request.
+
+    Mail is a side effect of registration, recovery and letter generation --
+    never the point of them. A misconfigured mail server should not 500 a
+    request that has already written to the database. Failures are logged so a
+    broken configuration is discoverable rather than silent.
+    """
+    try:
+        send_mail(subject, message, from_email, recipients, fail_silently=False)
+        return True
+    except Exception:
+        logger.error(
+            "%s (subject=%r, recipients=%r)",
+            fail_message or "Failed to send mail",
+            subject,
+            recipients,
+            exc_info=True,
+        )
+        return False
+
+
+def mail_admins_safely(subject, message, fail_message=None):
+    """``mail_admins`` counterpart to :func:`send_mail_safely`.
+
+    ``mail_admins`` takes no recipient list -- it targets ``settings.ADMINS`` --
+    so it cannot go through the helper above, but the failure policy is the same.
+    """
+    try:
+        mail_admins(subject, message, fail_silently=False)
+        return True
+    except Exception:
+        logger.error(
+            "%s (subject=%r, recipients=ADMINS)",
+            fail_message or "Failed to send mail to admins",
+            subject,
+            exc_info=True,
+        )
+        return False
+
 
 ### xhtml2pdf
 def final(request, *args, **kwargs):
     if request.method == "POST":
         textarea1 = request.POST.get("textarea1")
         roll = request.POST.get("roll")
-        unique = request.COOKIES.get('unique')
+        teacher = current_teacher(request)
+        if teacher is None:
+            return redirect("/loginTeacher")
+        unique = teacher.unique_id
         application = Application.objects.get(std__roll_number=roll, professor__unique_id=unique)
         
 
@@ -226,9 +273,9 @@ def registerStudent(request):
     context_dict = { "departments": departments , "programs": programs}
     
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -261,9 +308,9 @@ def registerStudent(request):
         #             },
         #         )
         #     return response
-        unique = request.COOKIES.get('unique')
-        if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
         
@@ -303,9 +350,9 @@ def loginStudent(request):
 
     #handles just after student is logged in
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -324,9 +371,9 @@ def loginStudent(request):
                     )
                     
             return response
-        unique = request.COOKIES.get('unique')
-        if TeacherInfo.objects.filter(unique_id__exact=unique).exists():
-
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
     
@@ -358,7 +405,7 @@ def loginStudent(request):
                         },
                     )
 
-            response.set_cookie('student', student)
+            set_student_cookie(response, student)
             return response
 
         else:
@@ -421,8 +468,12 @@ def loginStudent(request):
 def make_letter(request):
     if request.method == "POST":
         roll = request.POST.get("roll")
-        teacher_id = request.COOKIES.get("unique")
-        teacher_model = TeacherInfo.objects.get(unique_id=teacher_id)
+        # ``@login_required`` proves someone is signed in; this proves *which*
+        # professor, so the letter is built from their own applications only.
+        teacher_model = current_teacher(request)
+        if teacher_model is None:
+            return redirect("/loginTeacher")
+        teacher_id = teacher_model.unique_id
 
         stu = StudentLoginInfo.objects.get(roll_number=roll)
         appli = Application.objects.get(name=stu.username, professor__unique_id=teacher_id)
@@ -659,9 +710,9 @@ def studentform1(request):
 
     
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
             teachers = TeacherInfo.objects.filter(department=student.department)
             response =  render(
                     request,
@@ -835,22 +886,15 @@ def studentform2(request):
         file_info.save()
 
         qualities_info = Qualities(
-            # leadership = True if leaders == "on" else False,
-            # hardworking = True if hardwork == "on" else False,
-            # social = True if social == "on" else False,
-            # teamwork = True if teamwork == "on" else False,
-            # friendly =True if friendly == "on" else False,
-            # quality = quality,
-            # presentation = presentation,
             extracirricular = extra,
             application = info ,
         )
-        
-        if Qualities.objects.filter(application = info ).exists():
-            quality = Qualities.objects.get(application = info )
-            quality.delete()
-            
-        qualities_info.save()
+
+        # Delete-then-recreate must be atomic: a failure between the two used to
+        # leave the application permanently without a Qualities row.
+        with transaction.atomic():
+            Qualities.objects.filter(application=info).delete()
+            qualities_info.save()
 
         send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
 
@@ -861,9 +905,9 @@ def studentform2(request):
 
 def loginTeacher(request):
     if request.method == "GET":
-        naam = request.COOKIES.get('student')
-        if StudentLoginInfo.objects.filter(username__exact=naam).exists():
-            student = StudentLoginInfo.objects.get(username__exact=naam)
+        student = current_student(request)
+        if student is not None:
+            naam = student.username
 
             teachers = TeacherInfo.objects.filter(department=student.department)
             if Application.objects.filter(std__username=naam).exists():                 #std is foreign key for StudentLoginInfo
@@ -882,9 +926,9 @@ def loginTeacher(request):
                     )
                     
             return response
-        user = request.COOKIES.get('username')
-        if TeacherInfo.objects.filter(name__exact=user).exists():
-                unique = request.COOKIES.get('unique')
+        teacher = current_teacher(request)
+        if teacher is not None:
+                unique = teacher.unique_id
                 context = build_teacher_dashboard_context(unique, request.GET)
                 return render(request, "Teacher.html", context)
         return render(request, "loginTeacher.html")
@@ -907,22 +951,18 @@ def loginTeacher(request):
             if user is not None:
                 print("user authenticated")
                 login(request, user)
-                full_name = request.user.get_full_name()
-                x = full_name.split("/")
-                unique = x[-1]
-                print(x)
-                print(f'Unique id {unique}')
-                # teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                try:
-                     teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                except TeacherInfo.DoesNotExist:
-                    messages.error(request, f"No teacher found for ID: {unique}")
-                    return render(request, "loginTeacher.html")  
+                # Resolves via the ``TeacherInfo.user`` link, falling back to the
+                # legacy "Full Name/<unique_id>" convention for unlinked rows.
+                teacher_model = current_teacher(request)
+                if teacher_model is None:
+                    messages.error(request, "No teacher record is linked to this account.")
+                    return render(request, "loginTeacher.html")
+                unique = teacher_model.unique_id
 
                 context = build_teacher_dashboard_context(unique, request.GET)
                 response = render(request, "Teacher.html", context)
-                response.set_cookie("unique", unique)
-                response.set_cookie("username", user.username)
+                # Neither the "unique" nor the "username" cookie is issued any
+                # more: identity resolves from the session via current_teacher().
                 return response
             else:
                 messages.error(request, "Sorry!  The Password doesnot match.")
@@ -934,10 +974,17 @@ def loginTeacher(request):
 def logoutUser(request):
     logout(request)
     response = redirect("/")
+    # Kept even though login no longer sets it, so browsers still holding the
+    # retired cookie from an earlier release get it cleared on logout.
     response.delete_cookie('unique')
     response.delete_cookie('csrftoken')
     response.delete_cookie('username')
+    # The reset flow no longer issues these identity cookies (the OTP lives in
+    # the session now), but clear any stale ones a browser still holds from an
+    # earlier release so they cannot linger.
     response.delete_cookie('OTP_value')
+    response.delete_cookie('teacher_ko_user')
+    response.delete_cookie('teacher_ko_naam')
     return response
 
 def logoutStudent(request):
@@ -946,19 +993,16 @@ def logoutStudent(request):
     return response
 
 def forgotPassword(request):
-    # generating otp so that it is generated only once
-    OTP_value = OTP_generator(5)
-    response = render(request, "forgotPassword.html")
-    response.set_cookie("OTP_value", OTP_value)
-    return response
+    # The OTP is now generated and stored server-side in the ``otp`` view, not
+    # handed to the client in a cookie the attacker could read or forge.
+    return render(request, "forgotPassword.html")
 
 
 def forgotUsername(request):
-    # generating otp so that it is generated only once
-    OTP_value = OTP_generator(5)
-    response = render(request, "forgotUsername.html")
-    response.set_cookie("OTP_value", OTP_value)
-    return response
+    # No OTP cookie: this username-recovery flow finishes in ``checkEmail``,
+    # which never consulted the OTP, so the cookie was dead weight and a
+    # client-writable value that the reset flow used to trust.
+    return render(request, "forgotUsername.html")
 
 
 # check email of username is valid or not
@@ -968,12 +1012,12 @@ def checkEmail(request):
         email = request.POST.get("user_email")
         if User.objects.filter(email__exact=email).exists():
             user = User.objects.get(email__exact=email)
-            send_mail(
+            send_mail_safely(
                 "UserName ",
                 "Your username  is " + user.username,
                 "christronaldo9090909@gmail.com",
                 [email],
-                fail_silently=False,
+                fail_message="Username recovery mail failed",
             )
             messages.success(request, "Username has been sent to your gmail.")
             return redirect("loginTeacher")
@@ -985,65 +1029,66 @@ def checkEmail(request):
 
 # OTP
 def otp(request):
+    """Start a password reset: generate an OTP, keep it server-side, email it.
 
-    if request.method == "POST":
-        Usernaam = request.POST.get("username")
-        if User.objects.filter(username=Usernaam).exists():
-            sir = User.objects.get(username=Usernaam)
-            full_name = sir.get_full_name()
-            x = full_name.split("/")
-            name = x[0]
-            id = x[-1]
+    The secret and the target username live in the Django session (server-side
+    and signed), never in a client cookie. The response is identical whether or
+    not the submitted username exists, so this cannot be used to enumerate
+    accounts.
+    """
+    if request.method != "POST":
+        return redirect("forgotPassword")
 
-            if TeacherInfo.objects.filter(unique_id=id).exists():
-                master = TeacherInfo.objects.get(unique_id=id)
+    username = request.POST.get("username")
+    user = User.objects.filter(username=username).first()
 
-                OTP_value = request.COOKIES.get("OTP_value")
+    # Generate and store the OTP regardless, so timing/branching does not leak
+    # whether the account exists. Only a real account gets the email, so an
+    # attacker guessing a username can never learn the OTP.
+    otp_value = str(OTP_generator(5))
+    request.session["pw_reset_otp"] = otp_value
+    request.session["pw_reset_user"] = username or ""
+    request.session.pop("pw_reset_verified", None)
 
-                send_mail(
-                    "OTP ",
-                    "Your OTP for Recoomendation Letter is " + str(OTP_value),
-                    "recoioe@gmail.com",
-                    [master.email],
-                    fail_silently=False,
-                )
+    master = None
+    if user is not None:
+        master = TeacherInfo.objects.filter(user=user).first()
+        send_mail(
+            "OTP ",
+            "Your OTP for Recoomendation Letter is " + otp_value,
+            "recoioe@gmail.com",
+            [user.email],
+            fail_silently=True,
+        )
 
-                response = render(
-                    request,
-                    "otp.html",
-                    {"teacherkonam": master, "OTP_value": OTP_value},
-                )
-                # making cookies to store and send them to other view page
-
-                response.set_cookie("teacher_ko_naam", master)
-                response.set_cookie("teacher_ko_user", Usernaam)
-                return response
-
-            else:
-                messages.error(request, "Sorry You are not registered as a Professor.")
-                return render(request, "loginTeacher.html")
-
-        else:
-            messages.error(request, "Sorry You are not registered as a Professor.")
-            return render(request, "loginTeacher.html")
+    # Same page either way; ``master`` may be None for an unknown username.
+    return render(request, "otp.html", {"teacherkonam": master})
 
 
 # Otp check
 def OTP_check(request):
-    if request.method == "POST":
-        user_OTP_value = request.POST.get("user_typed_OTP_value")
+    """Verify the submitted OTP against the server-side session value.
 
-        # using cookies to obtain otp value and teacher
-        OTP_value = request.COOKIES.get("OTP_value")
-        teacher_ko_naam = request.COOKIES.get("teacher_ko_naam")
+    One-shot: the stored OTP is popped on the first attempt, so it cannot be
+    brute-forced across requests. Only a correct guess sets the short-lived
+    ``pw_reset_verified`` flag that ``changePassword`` requires.
+    """
+    if request.method != "POST":
+        return redirect("loginTeacher")
 
-        if OTP_value == user_OTP_value:
-            return render(
-                request, "validatePassword.html", {"teacher_ko_naam": teacher_ko_naam}
-            )
-        else:
-            messages.error(request, "Wrong OTP_value")
-            return render(request, "loginTeacher.html")
+    user_OTP_value = request.POST.get("user_typed_OTP_value")
+    real_OTP_value = request.session.pop("pw_reset_otp", None)
+
+    if real_OTP_value is not None and user_OTP_value == real_OTP_value:
+        request.session["pw_reset_verified"] = True
+        return render(
+            request,
+            "validatePassword.html",
+            {"teacher_ko_naam": request.session.get("pw_reset_user")},
+        )
+
+    messages.error(request, "Wrong OTP_value")
+    return render(request, "loginTeacher.html")
 
 
 # #to pass the username and to validate the user
@@ -1056,24 +1101,45 @@ def OTP_check(request):
 
 # pwd is changed of corresponding user passed from validatePassword
 def changePassword(request):
+    """Reset the password for the account that completed the OTP flow.
 
-    if request.method == "POST":
-        password1 = request.POST.get("password1")
-        password2 = request.POST.get("password2")
+    Gated on the server-side ``pw_reset_verified`` flag and the target username
+    stored in the session by ``otp`` - never a client cookie. The three reset
+    keys are cleared afterward so the flow cannot be replayed.
+    """
+    if request.method != "POST":
+        return redirect("loginTeacher")
 
-    if password1 == password2:
-        # Teacher ko Username using cookies from 'otp' view page
-        teacher_ko_user_naam = request.COOKIES.get("teacher_ko_user")
+    if not request.session.get("pw_reset_verified"):
+        messages.error(
+            request,
+            "Your password reset could not be verified. Please start again.",
+        )
+        return redirect("loginTeacher")
 
-        # changing Pwd
-        usr = User.objects.get(username=teacher_ko_user_naam)
+    password1 = request.POST.get("password1")
+    password2 = request.POST.get("password2")
+
+    if not password1 or password1 != password2:
+        messages.error(request, "Passwords do not match.")
+        return render(
+            request,
+            "validatePassword.html",
+            {"teacher_ko_naam": request.session.get("pw_reset_user")},
+        )
+
+    username = request.session.get("pw_reset_user")
+    usr = User.objects.filter(username=username).first()
+    if usr is not None:
         usr.set_password(password1)
         usr.save()
-        messages.success(request, "Password has been changed successfully.")
-        return render(request, "loginTeacher.html")
-    else:
 
-        return render(request, "validatePassword.html")
+    # One-time: tear the whole flow down so it cannot be replayed.
+    for key in ("pw_reset_otp", "pw_reset_user", "pw_reset_verified"):
+        request.session.pop(key, None)
+
+    messages.success(request, "Password has been changed successfully.")
+    return render(request, "loginTeacher.html")
 
 
 def OTP_generator(n):
@@ -1110,15 +1176,15 @@ def feedback(request):
             + str(feedback)
         )
 
-        mail_admins(
-            "Feedback", message, fail_silently=False, connection=None, html_message=None
+        mail_admins_safely(
+            "Feedback", message, fail_message="Contact-form admin notification failed"
         )
-        send_mail(
+        send_mail_safely(
             "Reply From Recoomendation Letter Team",
             "Thank you for your feedback. We will get back to you soon.",
             " christronaldo9090909@gmail.com",
             [email],
-            fail_silently=False,
+            fail_message="Contact-form reply mail failed",
         )
         messages.success(request, "Your message has been sent.")
         return render(request, "contact.html")
@@ -1127,10 +1193,10 @@ def feedback(request):
 def userDetails(request):
     subject=[]
     naya_subjects=[]
-    unique = request.COOKIES.get("unique")
-   
-    
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
+
     email = teacherkonam.email
     username = User.objects.get(email=email)
     subjects=teacherkonam.subjects.all()
@@ -1150,40 +1216,39 @@ def userDetails(request):
     )
     
 def studentDetails(request):
-    student = request.COOKIES.get("student")
-    if StudentLoginInfo.objects.filter(username__exact = student).exists():
-        student = StudentLoginInfo.objects.get(username__exact = student)
+    student = current_student(request)
+    if student is not None:
         return render(
             request,
             "studentDetails.html",
             {"username": student.username,'roll':student.roll_number, 'department': student.department,'program': student.program,'gender': student.gender,
             'dob': student.dob},
         )
-    else:
-        return render(
-            request,
-            "studentDetails.html")
-    
+    # No identity: send them to log in rather than rendering an empty profile.
+    # A student whose browser still holds a pre-Phase-4b unsigned cookie lands here.
+    return redirect("/loginStudent")
+
+
 def profileUpdate(request):
-    unique = request.COOKIES.get("unique")
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
 
     return render(request, "profileUpdate.html", {"teacher": teacherkonam})
 
 
 def profileUpdateRequest(request):
 
-    unique = request.COOKIES.get("unique")
-    teacherkonam = TeacherInfo.objects.get(unique_id=unique)
+    teacherkonam = current_teacher(request)
+    if teacherkonam is None:
+        return redirect("/loginTeacher")
+
     email = teacherkonam.email
     username = User.objects.get(email=email)
 
     if request.method == "POST":
         photo = request.FILES["file"]
 
-        # TeacherInfo.objects.filter(unique_id=unique).update(images=photo)
-
-        teacherkonam = TeacherInfo.objects.get(unique_id=unique)
         teacherkonam.images = photo
         teacherkonam.save()
 
@@ -1191,44 +1256,59 @@ def profileUpdateRequest(request):
 
 
 def changeUsername(request):
+    # Editing a professor's own login account. Identity comes from the session
+    # via current_teacher(); the caller can only rename themselves, not an
+    # arbitrary account named in a client-supplied "old_username".
     if request.method == "POST":
-        old_username = request.POST.get("old_username")
+        teacher = current_teacher(request)
+        if teacher is None:
+            return redirect("/loginTeacher")
+        user = teacher.user
+        if user is None:
+            messages.error(request, "No login account is linked to this professor.")
+            return redirect(userDetails)
+
         new_username = request.POST.get("new_username")
+        if not new_username:
+            messages.error(request, "Please provide a new username.")
+            return redirect(userDetails)
+        if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
+            messages.error(request, "Username already exists.")
+            return redirect(userDetails)
 
-        if User.objects.filter(username=old_username).exists():
-            if User.objects.filter(username=new_username).exists():
-                messages.error(request, "Username already exists.")
-                return redirect(userDetails)
-
-            user = User.objects.get(username=old_username)
-            user.username = new_username
-            user.save()
-            messages.success(request, "Username has been changed successfully.")
-            return redirect(loginTeacher)
-        else:
-            messages.error(request, "No such username exists. ")
+        user.username = new_username
+        user.save()
+        messages.success(request, "Username has been changed successfully.")
+        return redirect(loginTeacher)
     return redirect(userDetails)
 
 def changeStudentName(request):
+    # Editing a student's own account. Identity comes from the signed student
+    # cookie via current_student(); the caller cannot rename another student by
+    # supplying their name.
     if request.method == "POST":
-        old_username = request.POST.get("old_username")
+        student = current_student(request)
+        if student is None:
+            return redirect("/loginStudent")
+
         new_username = request.POST.get("new_username")
-
-        if StudentLoginInfo.objects.filter(username=old_username).exists():
-            if StudentLoginInfo.objects.filter(username=new_username).exists():
-                messages.error(request, "Student already exists.")
-                return redirect(studentDetails)
-
-            student = StudentLoginInfo.objects.get(username=old_username)
-            student.username = new_username
-            student.save()
-            messages.success(request, "Your username has been changed successfully.")
-            response = redirect(loginStudent)
-            response.delete_cookie('student')
-            return response
-        else:
-            messages.error(request, "No such student exists. ")
+        if not new_username:
+            messages.error(request, "Please provide a new username.")
             return redirect(studentDetails)
+        if StudentLoginInfo.objects.filter(username=new_username).exclude(
+            pk=student.pk
+        ).exists():
+            messages.error(request, "Student already exists.")
+            return redirect(studentDetails)
+
+        student.username = new_username
+        student.save()
+        messages.success(request, "Your username has been changed successfully.")
+        # The signed cookie still carries the old name, so drop it and make the
+        # student log in again under the new one.
+        response = redirect(loginStudent)
+        response.delete_cookie('student')
+        return response
     return redirect(studentDetails)
 
 
@@ -1240,15 +1320,16 @@ def userPasswordChange(request):
         new_password = request.POST.get("new_password")
         confirm_password = request.POST.get("confirm_password")
 
-        # to obtain old password,
-        user = User.objects.get(username=request.COOKIES.get("username"))
-        current_password = request.user.password
+        # The account being changed is the session's account. It used to be
+        # looked up from the client-set "username" cookie, which let anyone
+        # forge another professor's username and reset their password.
+        user = request.user
+        current_password = user.password
 
         # confirming typed old password is true or not
         old_new_check = check_password(typed_password, current_password)
         if old_new_check:
             if new_password == confirm_password:
-                user = User.objects.get(username=request.COOKIES.get("username"))
                 user.set_password(new_password)
                 user.save()
                 messages.success(request, "Password has been changed successfully.")
@@ -1260,23 +1341,26 @@ def userPasswordChange(request):
             messages.error(request, "Old Password didnt match")
             return redirect(userDetails)
 
-# to change the password of the corresponding student within website
-@login_required(login_url="/loginStudent")
+# to change the password of the corresponding student within website.
+# Not @login_required: that checks the teacher/admin session, which a student
+# never has. Identity comes from the signed student cookie instead.
 def studentPasswordChange(request):
+    student = current_student(request)
+    if student is None:
+        return redirect("/loginStudent")
+
     if request.method == "POST":
         typed_password = request.POST.get("old_password")
         new_password = request.POST.get("new_password")
         confirm_password = request.POST.get("confirm_password")
 
         # to obtain old password,
-        student = StudentLoginInfo.objects.get(username=request.COOKIES.get("student"))
         current_password = student.password
 
         # confirming typed old password is true or not
         old_new_check = check_password(typed_password, current_password)
         if old_new_check:
             if new_password == confirm_password:
-                student = StudentLoginInfo.objects.get(username=student)
                 student.password = make_password(new_password)
                 student.save()
                 response = redirect(loginStudent)
@@ -1294,24 +1378,17 @@ def studentPasswordChange(request):
 def changeTitle(request):
     if request.method == "POST":
         new_title = request.POST.get("new_title")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.title = new_title
             teacher.save()
 
             messages.success(request, "Title has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
@@ -1319,24 +1396,17 @@ def changeTitle(request):
 def changePhone(request):
     if request.method == "POST":
         new_phone = request.POST.get("new_phone")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.phone = new_phone
             teacher.save()
 
             messages.success(request, "Phone Number has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
@@ -1344,51 +1414,47 @@ def changePhone(request):
 def changeEmail(request):
     if request.method == "POST":
         new_email = request.POST.get("new_email")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.email = new_email
             teacher.save()
 
-            user = User.objects.get(username=usernaam)
+            user = teacher.user
+            if user is None:
+                messages.error(request, "No login account is linked to this professor.")
+                return redirect("/loginTeacher")
             user.email = new_email
             user.save()
 
             messages.success(request, "Email has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
 def addSubjects(request):
     if request.method == "POST":
         subject= request.POST.get("subject")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-      
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
-            naya_subject=Subject.objects.get(name=subject)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
+            # The field is ``sub_name``; ``name`` raised a FieldError (500) on
+            # every call. An unrecognised name is an ordinary user error, not
+            # a crash, so DoesNotExist is reported rather than propagated.
+            try:
+                naya_subject=Subject.objects.get(sub_name=subject)
+            except Subject.DoesNotExist:
+                messages.error(request, "No such Subject exists. ")
+                return redirect(userDetails)
             # to check if subject is in teacher model or not
             check=[]
             subjects=teacher.subjects.all()
             for i in subjects:
-                check.append(i.name)
-            
+                check.append(i.sub_name)
+
             if subject in check:
                 messages.error(request, "Subject already exists.")
                 return redirect(userDetails)
@@ -1407,11 +1473,8 @@ def deleteSubjects(request):
    
     if request.method == "POST":
         subject= request.POST.get("subject")
-        usernaam = request.COOKIES.get("username")
-
-        unique = request.COOKIES.get("unique")
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        teacher = current_teacher(request)
+        if teacher is not None:
             naya_subject=Subject.objects.get(sub_name=subject)
 
             # to check if subject is in teacher model or not
@@ -1450,117 +1513,13 @@ def getdetails(request):
     )
 
 
-# edit letter of recommendation
-def edit(request):
-    if request.method == "POST":
-        roll = request.POST.get("roll")
-        unique = request.COOKIES.get("unique")
-
-        presentation= request.POST.get('presentation')
-        quality = request.POST.get('qual')
-
-        leaders = request.POST.get('quality1')
-        hardwork = request.POST.get('quality2')
-        social = request.POST.get('quality3')
-        teamwork = request.POST.get('quality4')
-        friendly = request.POST.get('quality5')
-
-        recommend = request.POST.get('recommend')
-        prof_anecdote = request.POST.get('prof_anecdote')
-
-        info = Application.objects.get(std__roll_number=roll, professor__unique_id=unique)
-        # persist professor anecdote if provided
-        if prof_anecdote is not None:
-            info.prof_anecdote = prof_anecdote
-            info.save()
-
-
-        # qualities_info = Qualities(
-        #     leadership = True if leaders == "on" else False,
-        #     hardworking = True if hardwork == "on" else False,
-        #     social = True if social == "on" else False,
-        #     teamwork = True if teamwork == "on" else False,
-        #     friendly =True if friendly == "on" else False,
-        #     quality = quality,
-        #     presentation = presentation,
-        #     recommend = recommend,
-        #     #extracirricular = extra,
-        #     student = stu_info,
-        # )
-        # qualities_info.save(update_fields=["leadership", "hardworking", 
-        # "social", "teamwork", "friendly", "quality", "presentation", "recommend" , "student"])
-
-        Qualities.objects.filter(application  = info).update(leadership = True if leaders == "on" else False,
-                                                            hardworking = True if hardwork == "on" else False,
-                                                            social = True if social == "on" else False,
-                                                            teamwork = True if teamwork == "on" else False,
-                                                            friendly =True if friendly == "on" else False,
-                                                            quality = quality,
-                                                            presentation = presentation,
-                                                            recommend = recommend,)
-
-
-        #student = StudentData.objects.get(std__roll_number = roll)
-        stu = StudentLoginInfo.objects.get(roll_number=roll)
-        application = Application.objects.get(name=stu.username, professor__unique_id=unique)
-        paper = Paper.objects.get(application = application )
-        project = Project.objects.get(application = application)
-        university = University.objects.get(application = application)
-        quality = Qualities.objects.get(application = application)
-        academics = Academics.objects.get(application = application)
-        teacher_name = application.professor.name
-        files = Files.objects.get(application = application)
-
-        bisaya=application.subjects
-        
-        subjec=bisaya.split(',')
-        subjects=subjec[:-1]
-        subject=subjec[-1]
-
-        #student firstname
-        name = application.name
-        fname = name.split(' ')
-        firstname = fname[0]
-        
-
-        length=len(subjec)
-        if length==1:
-            value=True
-        else:
-            value=False
-
-        return render(request, 
-                        "test.html", 
-                        {
-                            "student": application,
-                            'subjects':subjects,
-                            'subject':subject,
-                            'value':value , 
-                            'firstname':firstname,
-                            "paper": paper,
-                            "project": project,
-                            "university": university,
-                            "quality": quality,
-                            "academics": academics,
-                            "teacher": teacher_name,
-                            "files": files, 
-                        }
-                    )
-
-
-def testing(request):
-    if request.method == "POST":
-        textarea = request.POST.get("textarea")
-    return render(request, "testing.html", {"letter": textarea})
-
-
 def teacher(request):
-    unique = request.COOKIES.get("unique")
-    # Identity comes from a client-controlled cookie, so an absent or stale
-    # value is an ordinary logged-out visitor, not an error. Every other
-    # Teacher.html entry point already checks this before building context.
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    # Identity comes from the session, never from a cookie: a visitor with no
+    # session is an ordinary logged-out visitor, not an error.
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
     context = build_teacher_dashboard_context(unique, request.GET)
     return render(request, "Teacher.html", context)
 
@@ -1571,9 +1530,10 @@ def renderCustom(request):
     if request.method != "POST":
         return redirect("/teacher")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     roll = request.POST.get("roll")
     application = get_object_or_404(
@@ -1585,15 +1545,20 @@ def renderCustom(request):
         application.prof_anecdote = anecdote
         application.save()
 
-    Qualities.objects.filter(application=application).update(
-        leadership=request.POST.get("quality1") == "on",
-        hardworking=request.POST.get("quality2") == "on",
-        social=request.POST.get("quality3") == "on",
-        teamwork=request.POST.get("quality4") == "on",
-        friendly=request.POST.get("quality5") == "on",
-        quality=request.POST.get("qual"),
-        presentation=request.POST.get("presentation"),
-        recommend=request.POST.get("recommend"),
+    # ``update_or_create`` rather than ``filter().update()``: an application with
+    # no Qualities row would silently discard everything the professor ticked.
+    Qualities.objects.update_or_create(
+        application=application,
+        defaults={
+            "leadership": request.POST.get("quality1") == "on",
+            "hardworking": request.POST.get("quality2") == "on",
+            "social": request.POST.get("quality3") == "on",
+            "teamwork": request.POST.get("quality4") == "on",
+            "friendly": request.POST.get("quality5") == "on",
+            "quality": request.POST.get("qual"),
+            "presentation": request.POST.get("presentation"),
+            "recommend": request.POST.get("recommend"),
+        },
     )
 
     template_obj = select_template(application.professor, request.POST.get("template_id"))
@@ -1607,11 +1572,10 @@ def renderCustom(request):
 
 def template(request):
     """The professor's template editor: their own templates plus the system library."""
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     return render(request, "customTemplate.html", {
         "professor": teacher,
         "templates": CustomTemplates.objects.filter(professor=teacher),
@@ -1623,13 +1587,12 @@ def getTemplate(request):
     if request.method != "POST":
         return redirect("/makeTemplate")
 
-    # Identity comes from the cookie, never from the posted ``uid`` field: a
+    # Identity comes from the session, never from the posted ``uid`` field: a
     # hidden input is client-controlled and could name another professor.
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     content = request.POST.get("content") or ""
     name = (request.POST.get("templateName") or "").strip()
     if not name:
@@ -1682,11 +1645,10 @@ def duplicate_template(request):
     if request.method != "POST":
         return redirect("/makeTemplate")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
 
-    teacher = TeacherInfo.objects.get(unique_id=unique)
     try:
         template_id = int(request.POST.get("template_id", ""))
     except (TypeError, ValueError):
@@ -1782,6 +1744,7 @@ def generate_unique_id():
     return str(random.randint(10000, 99999))
 
 
+@user_passes_test(lambda u: u.is_authenticated and u.is_superuser, login_url="/loginAdmin")
 def adminDashboard(request):
     if request.method == 'POST':
         form = TeacherInfoForm(request.POST, request.FILES)
@@ -1814,12 +1777,17 @@ def adminDashboard(request):
             )
             user.email = teacher_info.email
             user.save()
-            
+
+            # Link the record to its login account, so identity resolves from
+            # the session rather than the legacy name convention.
+            teacher_info.user = user
+            teacher_info.save(update_fields=["user"])
+
             # Save many-to-many relationships
             form.save_m2m()
             
             messages.success(request, 'Teacher added successfully!')
-            send_mail('Account Created Successfully', f'Dear sir,\n  Your account has been created in Recommendation Letter Generator. Your username is {uname}. Please login to verify. If you get any problem please contact us.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n \nBest Regards, \nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [teacher_info.email], fail_silently=False)
+            send_mail_safely('Account Created Successfully', f'Dear sir,\n  Your account has been created in Recommendation Letter Generator. Your username is {uname}. Please login to verify. If you get any problem please contact us.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n \nBest Regards, \nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [teacher_info.email], fail_message="Teacher account-creation mail failed")
 
 
             return redirect('adminDashboard')
@@ -1859,14 +1827,15 @@ from fpdf import FPDF
 def download_generated(request):
     """Re-serve the letter stored on an Application (FR-5).
 
-    Scoped to the professor in the ``unique`` cookie so one professor cannot
+    Scoped to the professor holding the session so one professor cannot
     fetch another's letters by guessing an id. Rows generated before Phase 3
     started stamping ``generated_letter`` have no stored file, so we redirect
     back to the dashboard with an explanation instead of 500-ing.
     """
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     # A missing or non-numeric id would otherwise reach the ORM and raise
     # ValueError, which surfaces as a 500 (and a debug traceback when
@@ -1894,15 +1863,15 @@ def download_generated(request):
     )
 
 
-@csrf_exempt
 def download_letter(request):
     """Export a letter as PDF/DOCX, store a copy, and record the FR-5 tracking fields."""
     if request.method != "POST":
         return redirect("/teacher")
 
-    unique = request.COOKIES.get("unique")
-    if not unique or not TeacherInfo.objects.filter(unique_id=unique).exists():
+    teacher = current_teacher(request)
+    if teacher is None:
         return redirect("/loginTeacher")
+    unique = teacher.unique_id
 
     file_format = request.POST.get("format")
     if file_format not in ("pdf", "docx"):
@@ -1989,8 +1958,20 @@ def registerProfessor(request):
                 last_name='/' + unique_id,
                 email=teacher_info.email
             )
+            # Self-registration is public and unauthenticated, so a new
+            # professor lands inactive and cannot authenticate until a
+            # superuser approves them (User.is_active is toggleable in the
+            # stock Django admin). Accounts created from adminDashboard are
+            # deliberate and stay active.
+            user.is_active = False
             user.save()
-            messages.success(request, 'Professor registered successfully! You can now log in.')
+
+            # Link the record to its login account, so identity resolves from
+            # the session rather than the legacy name convention.
+            teacher_info.user = user
+            teacher_info.save(update_fields=["user"])
+
+            messages.success(request, 'Professor registered successfully! Your account is awaiting administrator approval - you will be able to log in once it has been approved.')
             return redirect('loginTeacher')
     else:
         form = TeacherInfoForm()

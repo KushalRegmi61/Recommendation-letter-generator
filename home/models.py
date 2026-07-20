@@ -1,3 +1,4 @@
+from django.contrib.auth.models import User
 from django.db import models
 from django.db.models.deletion import CASCADE
 
@@ -59,10 +60,16 @@ class TeacherInfo(models.Model):
     office_address = models.CharField(max_length=200, blank=True, null=True)
     images = models.ImageField(upload_to='images/', blank=True, default="cute_baby.gif")
     subjects = models.ManyToManyField(Subject)
+    # The authoritative link to the login account. Historically this was encoded
+    # in the User's full name as "Full Name/<unique_id>"; that string convention
+    # is still honoured as a fallback for rows this FK could not be matched to.
+    user = models.OneToOneField(
+        User, null=True, blank=True, on_delete=models.SET_NULL,
+    )
 
     def __str__(self):
         return str(self.name)
-    
+
     class Meta:
         db_table = 'TeacherInfo'
 
@@ -176,7 +183,10 @@ class University(models.Model):
         db_table = 'University'
 
 class Qualities(models.Model):
-    application = models.ForeignKey(Application, on_delete= CASCADE)
+    # unique: exactly one row per application. ``renderCustom`` uses
+    # ``update_or_create``, whose ``.get()`` raises MultipleObjectsReturned if
+    # duplicates ever exist. Enforce the invariant instead of coding around it.
+    application = models.OneToOneField(Application, on_delete= CASCADE)
 
     leadership = models.BooleanField(default=False) 
     hardworking = models.BooleanField(default=False) 

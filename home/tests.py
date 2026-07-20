@@ -1,20 +1,69 @@
 import os
+import re
 import tempfile
+from unittest import mock
 from datetime import date, datetime
 
-from django.contrib.auth.models import User
+from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.models import AnonymousUser, User
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, SimpleTestCase, override_settings
+from django.test import RequestFactory, TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo, CustomTemplates, Qualities,
-    Paper, Project, Files,
+    Paper, Project, Files, Subject,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
+from home import views as _views
+
+
+def login_as_teacher(client, teacher, password="test-pw"):
+    """Sign ``client`` in as the Django user behind ``teacher``.
+
+    Creates and links a User if the TeacherInfo does not have one. Replaces the
+    old ``client.cookies["unique"] = ...`` idiom, which no longer authenticates.
+    """
+    user = teacher.user
+    if user is None:
+        user = User.objects.create_user(
+            username=f"user-{teacher.unique_id}", password=password
+        )
+        user.first_name = f"{teacher.name}/{teacher.unique_id}"
+        user.save()
+        teacher.user = user
+        teacher.save(update_fields=["user"])
+    else:
+        user.set_password(password)
+        user.save()
+    client.force_login(user)
+    return user
+
+
+def login_as_student(client, student):
+    """Give ``client`` a validly signed ``student`` cookie.
+
+    Replaces the old ``client.cookies["student"] = "name"`` idiom: an unsigned
+    value no longer resolves to anyone.
+    """
+    from home.identity import set_student_cookie
+
+    class _Carrier:
+        def __init__(self):
+            self.cookies = {}
+
+        def set_cookie(self, key, value, **kwargs):
+            self.cookies[key] = value
+
+    carrier = _Carrier()
+    set_student_cookie(carrier, student)
+    for key, value in carrier.cookies.items():
+        client.cookies[key] = value
+    return student
 
 
 class ModelFieldTests(TestCase):
@@ -268,6 +317,22 @@ class Studentform2PostTests(TestCase):
         aca = Academics.objects.get(application=self.app)
         self.assertEqual(aca.final_percentage, "88")
 
+    def test_a_failed_qualities_save_does_not_destroy_the_existing_row(self):
+        # studentform2 deletes the old row before saving the replacement. Without
+        # the transaction.atomic() wrapper a failed save leaves the application
+        # permanently Qualities-less.
+        from unittest import mock
+        Qualities.objects.create(
+            application=self.app, extracirricular="OLD MARKER",
+        )
+        with mock.patch.object(Qualities, "save", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/studentform2", data=self._post_data())
+        # The old row must still be there - the delete is rolled back with it.
+        self.assertEqual(
+            Qualities.objects.get(application=self.app).extracirricular, "OLD MARKER"
+        )
+
     def test_duplicate_pending_is_rejected(self):
         # studentform2 fetches-and-updates the existing pending application (via
         # Application.objects.get(std__username=..., professor__name=...)), so the
@@ -291,7 +356,7 @@ class Studentform1RenderTests(TestCase):
         )
 
     def test_form_has_new_fr2_inputs(self):
-        self.client.cookies["student"] = "fay"
+        login_as_student(self.client, self.student)
         resp = self.client.get("/studentform1")
         self.assertEqual(resp.status_code, 200)
         html = resp.content.decode()
@@ -613,7 +678,7 @@ class TeacherDashboardViewTests(TestCase):
         University.objects.create(
             uni_name="Aalto", country="Finland", application=self.fin_app,
         )
-        self.client.cookies["unique"] = "T400"
+        login_as_teacher(self.client, self.prof)
         self.client.cookies["username"] = "Prof Four"
 
     def test_teacher_view_renders_all_applications_by_default(self):
@@ -749,15 +814,16 @@ class TeacherDashboardViewTests(TestCase):
         self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
         self.assertNotIn("BEX", response.context["filter_options"]["departments"])
 
-    def test_teacher_view_redirects_when_cookie_is_missing(self):
-        del self.client.cookies["unique"]
+    def test_teacher_view_redirects_when_not_signed_in(self):
+        self.client.logout()
         response = self.client.get("/teacher")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
 
-    def test_teacher_view_redirects_when_cookie_is_stale(self):
-        # A professor whose TeacherInfo was removed, or a hand-edited cookie.
-        self.client.cookies["unique"] = "T000-does-not-exist"
+    def test_teacher_view_redirects_when_only_a_forged_cookie_is_present(self):
+        # No session, but a hand-edited cookie naming a real professor.
+        self.client.logout()
+        self.client.cookies["unique"] = "T400"
         response = self.client.get("/teacher", {"country": "USA"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
@@ -808,7 +874,7 @@ class DownloadGeneratedTests(TestCase):
             name="eve legacy", email="e@example.com", professor=self.prof,
             std=stu, is_generated=True,
         )
-        self.client.cookies["unique"] = "T500"
+        login_as_teacher(self.client, self.prof)
 
     def test_returns_stored_file(self):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
@@ -822,18 +888,19 @@ class DownloadGeneratedTests(TestCase):
         self.assertEqual(response["Location"], "/teacher")
 
     def test_other_professors_letter_is_not_served(self):
-        self.client.cookies["unique"] = "T501"
+        login_as_teacher(self.client, self.other)
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 404)
 
     def test_anonymous_request_is_sent_to_the_login_page(self):
-        del self.client.cookies["unique"]
+        self.client.logout()
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
 
-    def test_unknown_professor_cookie_is_sent_to_the_login_page(self):
-        self.client.cookies["unique"] = "T-does-not-exist"
+    def test_forged_cookie_without_a_session_is_sent_to_the_login_page(self):
+        self.client.logout()
+        self.client.cookies["unique"] = "T500"
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
@@ -1700,7 +1767,7 @@ class RenderCustomViewTests(TestCase):
             template_name="Fallback", template="FALLBACK", professor=self.teacher,
             is_default=True,
         )
-        self.client.cookies["unique"] = "T-F"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_selected_template_is_rendered(self):
         response = self.client.post("/renderCustom", {
@@ -1747,8 +1814,8 @@ class RenderCustomViewTests(TestCase):
         self.assertFalse(quality.social)
         self.assertEqual(quality.quality, "diligent")
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/renderCustom", {"roll": "080BCT007"})
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -1757,7 +1824,7 @@ class RenderCustomViewTests(TestCase):
         other = TeacherInfo.objects.create(
             name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-G"
+        login_as_teacher(self.client, other)
         response = self.client.post("/renderCustom", {"roll": "080BCT007"})
         self.assertEqual(response.status_code, 404)
 
@@ -1823,14 +1890,12 @@ class MakeLetterTemplateListTests(TestCase):
 
     def test_the_picker_offers_system_templates(self):
         self.client.force_login(self.user)
-        self.client.cookies["unique"] = "T-H"
         response = self.client.post("/makeLetter", {"roll": "080BCT321"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Formal / Academic")
 
     def test_the_picker_posts_a_template_id(self):
         self.client.force_login(self.user)
-        self.client.cookies["unique"] = "T-H"
         response = self.client.post("/makeLetter", {"roll": "080BCT321"})
         self.assertContains(response, 'name="template_id"')
         self.assertNotContains(response, 'name="temp"')
@@ -1857,7 +1922,7 @@ class DownloadLetterTests(TestCase):
             template_name="Export", template="EXPORTED for {{ app.name }}",
             professor=self.teacher,
         )
-        self.client.cookies["unique"] = "T-G"
+        login_as_teacher(self.client, self.teacher)
 
     def _post(self, **extra):
         payload = {"roll": "080BCT099", "format": "pdf", "template_id": self.tpl.pk}
@@ -1940,14 +2005,14 @@ class DownloadLetterTests(TestCase):
         )
 
     def test_another_professor_cannot_export_this_letter(self):
-        TeacherInfo.objects.create(
+        other = TeacherInfo.objects.create(
             name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-H"
+        login_as_teacher(self.client, other)
         self.assertEqual(self._post().status_code, 404)
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self._post()
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -2087,7 +2152,7 @@ class DuplicateTemplateTests(TestCase):
             name="Prof J", unique_id="T-J", email="j@example.com", department=self.dept,
         )
         self.system = CustomTemplates.objects.filter(is_system=True).first()
-        self.client.cookies["unique"] = "T-I"
+        login_as_teacher(self.client, self.teacher)
 
     def test_duplicating_creates_an_owned_editable_copy(self):
         response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
@@ -2135,8 +2200,8 @@ class DuplicateTemplateTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -2214,7 +2279,7 @@ class TemplateEditorViewTests(TestCase):
         CustomTemplates.objects.create(
             template_name="Not Mine At All", template="body", professor=self.other
         )
-        self.client.cookies["unique"] = "T-K"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_professors_own_templates_are_listed(self):
         response = self.client.get("/makeTemplate")
@@ -2235,14 +2300,15 @@ class TemplateEditorViewTests(TestCase):
         self.assertContains(response, "/duplicateTemplate")
         self.assertContains(response, f'name="template_id" value="{system.pk}"')
 
-    def test_a_stale_cookie_redirects_instead_of_crashing(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_a_forged_cookie_redirects_instead_of_crashing(self):
+        self.client.logout()
+        self.client.cookies["unique"] = "T-K"
         response = self.client.get("/makeTemplate")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
 
-    def test_no_cookie_redirects_instead_of_crashing(self):
-        del self.client.cookies["unique"]
+    def test_an_unauthenticated_request_redirects_instead_of_crashing(self):
+        self.client.logout()
         response = self.client.get("/makeTemplate")
         self.assertEqual(response.status_code, 302)
 
@@ -2265,7 +2331,7 @@ class GetTemplateOwnershipTests(TestCase):
         self.victim = TeacherInfo.objects.create(
             name="Prof N", unique_id="T-N", email="n@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-M"
+        login_as_teacher(self.client, self.teacher)
 
     def test_a_template_is_saved_to_the_signed_in_professor(self):
         self.client.post("/getTemplate", {
@@ -2322,8 +2388,8 @@ class GetTemplateOwnershipTests(TestCase):
         })
         self.assertFalse(CustomTemplates.objects.get(template_name="Mine").is_system)
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/getTemplate", {
             "content": "x", "templateName": "y", "uid": "T-M",
         })
@@ -2362,7 +2428,7 @@ class TemplateEditorPrefillTests(TestCase):
         self.mine = CustomTemplates.objects.create(
             template_name="Round Trip", template=self.BODY, professor=self.teacher
         )
-        self.client.cookies["unique"] = "T-O"
+        login_as_teacher(self.client, self.teacher)
 
     def _option_attr(self, html):
         import re
@@ -2432,7 +2498,7 @@ class DashboardTemplateLinkTests(TestCase):
         self.teacher = TeacherInfo.objects.create(
             name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-O"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_dashboard_links_to_the_template_editor(self):
         response = self.client.get("/teacher")
@@ -2451,3 +2517,1255 @@ class DashboardTemplateLinkTests(TestCase):
         response = self.client.get("/teacher")
         self.assertContains(response, "My Favourite")
         self.assertNotContains(response, "starter template")
+
+
+class QualityPersistenceTests(TestCase):
+    """The professor's checkbox input must survive a missing Qualities row."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof P", unique_id="T-P", email="p@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Quality Student", roll_number="080BCT770", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Quality Student", std=self.student, professor=self.teacher,
+            subjects="Networks",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="Q", template="{{ app.name }}", professor=self.teacher,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def _post(self, **extra):
+        payload = {"roll": "080BCT770", "template_id": self.tpl.pk}
+        payload.update(extra)
+        return self.client.post("/renderCustom", payload)
+
+    def test_qualities_are_saved_when_no_row_exists_yet(self):
+        # This is the data-loss case: .update() on an empty queryset is a silent no-op.
+        self.assertFalse(Qualities.objects.filter(application=self.application).exists())
+        self._post(quality1="on", quality2="on", qual="diligent")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertTrue(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertFalse(quality.social)
+        self.assertEqual(quality.quality, "diligent")
+
+    def test_qualities_are_updated_when_a_row_already_exists(self):
+        Qualities.objects.create(application=self.application, leadership=True)
+        self._post(quality2="on", qual="thorough")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertFalse(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertEqual(quality.quality, "thorough")
+
+    def test_no_duplicate_qualities_row_is_created(self):
+        self._post(quality1="on")
+        self._post(quality2="on")
+        self.assertEqual(
+            Qualities.objects.filter(application=self.application).count(), 1
+        )
+
+    def test_an_existing_extracurricular_value_is_preserved(self):
+        # ``extracirricular`` comes from the student's intake form and is not
+        # part of the professor's checkbox set; updating must not clear it.
+        Qualities.objects.create(
+            application=self.application, extracirricular="Robotics club",
+        )
+        self._post(quality1="on")
+        quality = Qualities.objects.get(application=self.application)
+        self.assertEqual(quality.extracirricular, "Robotics club")
+        self.assertTrue(quality.leadership)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class MissingUploadTests(TestCase):
+    """A student who skipped an upload must not 500 the letter form."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof R", unique_id="T-R", email="r@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="No Upload", roll_number="080BCT880", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="No Upload", std=self.student, professor=self.teacher, subjects="Maths",
+        )
+        Paper.objects.create(application=self.application)
+        Project.objects.create(application=self.application)
+        University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+        )
+        Qualities.objects.create(application=self.application)
+        Academics.objects.create(application=self.application)
+        # Every file field left empty - the case that used to crash.
+        Files.objects.create(application=self.application)
+        self.user = User.objects.create_user(username="profr", password="pw")
+        self.user.first_name = "Prof R/T-R"
+        self.user.save()
+        self.client.force_login(self.user)
+
+    def test_the_letter_form_renders_without_any_uploads(self):
+        response = self.client.post("/makeLetter", {"roll": "080BCT880"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_the_dashboard_renders_without_a_teacher_photo(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_present_upload_still_renders_its_link(self):
+        from django.core.files.base import ContentFile
+        files = Files.objects.get(application=self.application)
+        files.transcript.save("transcript.pdf", ContentFile(b"%PDF-1.4 fake"), save=True)
+        response = self.client.post("/makeLetter", {"roll": "080BCT880"})
+        self.assertEqual(response.status_code, 200)
+        # Assert on the link itself, not the bare word "transcript": the fallback
+        # branch renders "No transcript uploaded." and would satisfy that too.
+        files.refresh_from_db()
+        self.assertContains(response, files.transcript.url)
+        self.assertNotContains(response, "No transcript uploaded.")
+
+
+class QualitiesUniquenessTests(TestCase):
+    """One Qualities row per Application, enforced by the database."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof U", unique_id="T-U", email="u@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Unique Student", roll_number="080BCT990", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Unique Student", std=self.student, professor=self.teacher,
+            subjects="Algorithms",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="U", template="{{ app.name }}", professor=self.teacher,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_a_second_qualities_row_for_one_application_is_rejected(self):
+        Qualities.objects.create(application=self.application)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Qualities.objects.create(application=self.application)
+
+    def test_two_applications_may_each_have_their_own_row(self):
+        other_application = Application.objects.create(
+            name="Unique Student", std=self.student, professor=self.teacher,
+            subjects="Compilers",
+        )
+        Qualities.objects.create(application=self.application)
+        Qualities.objects.create(application=other_application)
+        self.assertEqual(Qualities.objects.count(), 2)
+
+    def test_render_custom_still_works_with_exactly_one_row(self):
+        # The constraint guarantees update_or_create's .get() can never see the
+        # MultipleObjectsReturned case that would 500 the professor.
+        Qualities.objects.create(application=self.application, leadership=True)
+        response = self.client.post(
+            "/renderCustom",
+            {"roll": "080BCT990", "template_id": self.tpl.pk, "quality2": "on"},
+        )
+        self.assertEqual(response.status_code, 200)
+        quality = Qualities.objects.get(application=self.application)
+        self.assertFalse(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertEqual(Qualities.objects.filter(application=self.application).count(), 1)
+
+
+class UnicodePdfTests(TestCase):
+    """Non-Latin-1 text must survive PDF export (FR-1)."""
+
+    def test_an_em_dash_is_preserved_not_replaced(self):
+        from home.letters import build_pdf_bytes
+        data = build_pdf_bytes("A — B")
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_the_pdf_embeds_a_font_subset(self):
+        # FontFile2 only appears once a TrueType subset is embedded; with the
+        # old Latin-1 core-font path it is absent.
+        from home.letters import build_pdf_bytes
+        self.assertIn(b"FontFile2", build_pdf_bytes("A — B"))
+
+    def test_curly_quotes_survive(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("“Quoted” and ‘single’").startswith(b"%PDF"))
+
+    def test_plain_ascii_still_works(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("Dear Committee,\n\nRegards").startswith(b"%PDF"))
+
+    def test_a_long_letter_still_paginates(self):
+        from home.letters import build_pdf_bytes
+        long_text = "\n\n".join(f"Paragraph {i}. " * 20 for i in range(60))
+        self.assertTrue(build_pdf_bytes(long_text).startswith(b"%PDF"))
+
+    def test_the_seeded_templates_still_export(self):
+        from home.letters import build_pdf_bytes, render_letter
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof U", unique_id="T-U", email="u@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Uni Student", roll_number="080BCT900", department=dept,
+            program=program, password="x", dob="2000-01-01", gender="Female",
+        )
+        application = Application.objects.create(
+            name="Uni Student", std=student, professor=teacher, subjects="Physics",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(application, tpl)
+                self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))
+
+
+class RemovedEndpointTests(TestCase):
+    """Dead endpoints are gone, not merely unlinked."""
+
+    def test_the_edit_endpoint_no_longer_exists(self):
+        # It was routed, unguarded, and wrote to the database.
+        self.assertEqual(self.client.post("/edit", {"roll": "x"}).status_code, 404)
+
+    def test_the_edit_view_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "edit"))
+
+    def test_the_testing_view_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "testing"))
+
+
+class TeacherUserLinkTests(TestCase):
+    """TeacherInfo links to a Django User by FK, not by a name-string convention."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+
+    def test_a_teacher_can_be_linked_to_a_user(self):
+        user = User.objects.create_user(username="linked", password="pw")
+        teacher = TeacherInfo.objects.create(
+            name="Prof Linked", unique_id="T-LINK", email="l@example.com",
+            department=self.dept, user=user,
+        )
+        self.assertEqual(teacher.user, user)
+        self.assertEqual(user.teacherinfo, teacher)
+
+    def test_the_link_is_optional(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof Unlinked", unique_id="T-UNLINK", email="u@example.com",
+            department=self.dept,
+        )
+        self.assertIsNone(teacher.user)
+
+    def test_one_user_cannot_be_two_teachers(self):
+        from django.db.utils import IntegrityError
+        user = User.objects.create_user(username="solo", password="pw")
+        TeacherInfo.objects.create(
+            name="A", unique_id="T-A1", email="a@example.com",
+            department=self.dept, user=user,
+        )
+        with self.assertRaises(IntegrityError):
+            TeacherInfo.objects.create(
+                name="B", unique_id="T-B1", email="b@example.com",
+                department=self.dept, user=user,
+            )
+
+    def test_deleting_the_user_does_not_delete_the_teacher(self):
+        user = User.objects.create_user(username="doomed", password="pw")
+        teacher = TeacherInfo.objects.create(
+            name="Prof Doomed", unique_id="T-DOOM", email="d@example.com",
+            department=self.dept, user=user,
+        )
+        user.delete()
+        teacher.refresh_from_db()
+        self.assertIsNone(teacher.user)
+
+
+class CurrentTeacherTests(TestCase):
+    """current_teacher resolves the acting professor from the session, not a cookie."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.user = User.objects.create_user(username="ct", password="pw")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof CT", unique_id="T-CT", email="ct@example.com",
+            department=self.dept, user=self.user,
+        )
+        self.factory = RequestFactory()
+
+    def _request(self, user=None, cookies=None):
+        request = self.factory.get("/")
+        request.user = user or AnonymousUser()
+        request.COOKIES.update(cookies or {})
+        return request
+
+    def test_an_authenticated_linked_user_resolves(self):
+        from home.identity import current_teacher
+        self.assertEqual(current_teacher(self._request(self.user)), self.teacher)
+
+    def test_an_anonymous_request_resolves_to_none(self):
+        from home.identity import current_teacher
+        self.assertIsNone(current_teacher(self._request()))
+
+    def test_a_forged_cookie_is_ignored(self):
+        # The whole point of this phase.
+        from home.identity import current_teacher
+        victim_user = User.objects.create_user(username="victim", password="pw")
+        TeacherInfo.objects.create(
+            name="Victim", unique_id="T-VICTIM", email="v@example.com",
+            department=self.dept, user=victim_user,
+        )
+        request = self._request(self.user, {"unique": "T-VICTIM"})
+        self.assertEqual(current_teacher(request), self.teacher)
+
+    def test_a_cookie_alone_grants_nothing(self):
+        from home.identity import current_teacher
+        self.assertIsNone(current_teacher(self._request(None, {"unique": "T-CT"})))
+
+    def test_an_unlinked_teacher_resolves_by_the_name_convention(self):
+        # Legacy rows the data migration could not match keep working.
+        from home.identity import current_teacher
+        legacy_user = User.objects.create_user(username="legacy", password="pw")
+        legacy_user.first_name = "Prof Legacy/T-LEGACY"
+        legacy_user.save()
+        legacy = TeacherInfo.objects.create(
+            name="Prof Legacy", unique_id="T-LEGACY", email="lg@example.com",
+            department=self.dept,
+        )
+        self.assertEqual(current_teacher(self._request(legacy_user)), legacy)
+
+    def test_an_authenticated_non_teacher_resolves_to_none(self):
+        from home.identity import current_teacher
+        plain = User.objects.create_user(username="plain", password="pw")
+        self.assertIsNone(current_teacher(self._request(plain)))
+
+
+class LoginHelperTests(TestCase):
+    """The shared test helper really authenticates."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof LH", unique_id="T-LH", email="lh@example.com",
+            department=self.dept,
+        )
+
+    def test_it_creates_and_links_a_user(self):
+        login_as_teacher(self.client, self.teacher)
+        self.teacher.refresh_from_db()
+        self.assertIsNotNone(self.teacher.user)
+
+    def test_it_reuses_an_existing_user(self):
+        user = User.objects.create_user(username="existing", password="pw")
+        self.teacher.user = user
+        self.teacher.save()
+        self.assertEqual(login_as_teacher(self.client, self.teacher), user)
+
+    def test_the_resolved_teacher_matches(self):
+        from home.identity import current_teacher
+        login_as_teacher(self.client, self.teacher)
+        request = RequestFactory().get("/")
+        request.user = self.teacher.user
+        self.assertEqual(current_teacher(request), self.teacher)
+
+
+class CookieImpersonationTests(TestCase):
+    """A forged cookie must not act as anyone (the Phase 4b headline)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.victim = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="T-VIC", email="vic@example.com",
+            department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Victim Student", roll_number="080BCT950", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01",
+        )
+        self.application = Application.objects.create(
+            name="Victim Student", std=self.student, professor=self.victim,
+        )
+        CustomTemplates.objects.create(
+            template_name="Victim Template", template="secret",
+            professor=self.victim, is_default=True,
+        )
+
+    def test_a_forged_cookie_cannot_reach_the_dashboard(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_a_forged_cookie_cannot_list_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        self.assertEqual(self.client.get("/makeTemplate").status_code, 302)
+
+    def test_a_forged_cookie_cannot_preview_a_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.post("/renderCustom", {"roll": "080BCT950"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_forged_cookie_cannot_export_a_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.post(
+            "/download_letter/", {"roll": "080BCT950", "format": "pdf"}
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_forged_cookie_cannot_write_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        self.client.post("/getTemplate", {"content": "x", "templateName": "Injected"})
+        self.assertFalse(
+            CustomTemplates.objects.filter(template_name="Injected").exists()
+        )
+
+    def test_a_forged_cookie_cannot_duplicate_templates(self):
+        self.client.cookies["unique"] = "T-VIC"
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.client.post("/duplicateTemplate", {"template_id": system.pk})
+        self.assertEqual(
+            CustomTemplates.objects.filter(professor=self.victim).count(), 1
+        )
+
+    def test_a_forged_cookie_cannot_redownload_a_stored_letter(self):
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get(f"/download_generated/?id={self.application.id}")
+        self.assertEqual(response.status_code, 302)
+
+    def test_one_professor_cannot_act_as_another_by_cookie(self):
+        # Signed in as a real professor, but forging someone else's cookie.
+        attacker = TeacherInfo.objects.create(
+            name="Attacker", unique_id="T-ATK", email="atk@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, attacker)
+        self.client.cookies["unique"] = "T-VIC"
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Victim Template")
+
+
+class ProfessorRegistrationLinksAccountTests(TestCase):
+    """A newly registered professor must be linked to their login account."""
+
+    def test_registering_a_professor_links_the_login_account(self):
+        dept = Department.objects.create(dept_name="BEX")
+        subject = Subject.objects.create(sub_name="Operating Systems")
+        response = self.client.post("/registerProfessor/", {
+            "name": "New Prof", "title": "Professor", "phone": "9800000000",
+            "email": "new@example.com", "department": dept.pk,
+            "subjects": [subject.pk],
+            "password": "pw-12345", "confirm_password": "pw-12345",
+        })
+        self.assertEqual(response.status_code, 302)
+
+        teacher = TeacherInfo.objects.get(email="new@example.com")
+        self.assertIsNotNone(teacher.user)
+        self.assertEqual(teacher.user.email, "new@example.com")
+
+        # And that link is what resolves identity on a real request.
+        from home.identity import current_teacher
+        request = RequestFactory().get("/")
+        request.user = teacher.user
+        self.assertEqual(current_teacher(request), teacher)
+
+
+class StudentCookieSigningTests(TestCase):
+    """The student cookie must be tamper-evident."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Real Student", roll_number="080BCT960", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+        self.victim = StudentLoginInfo.objects.create(
+            username="Other Student", roll_number="080BCT961", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+        self.factory = RequestFactory()
+
+    def _request(self, cookies):
+        request = self.factory.get("/")
+        request.COOKIES.update(cookies)
+        return request
+
+    def _sign(self, value):
+        from django.core import signing
+        from home.identity import STUDENT_COOKIE_SALT
+        return signing.get_cookie_signer(salt=STUDENT_COOKIE_SALT).sign(value)
+
+    def test_an_unsigned_cookie_is_rejected(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({"student": "Other Student"})))
+
+    def test_a_signed_cookie_resolves(self):
+        from home.identity import current_student
+        self.assertEqual(
+            current_student(self._request({"student": self._sign("Real Student")})),
+            self.student,
+        )
+
+    def test_a_tampered_signature_is_rejected(self):
+        from home.identity import current_student
+        tampered = self._sign("Real Student").replace("Real Student", "Other Student", 1)
+        self.assertIsNone(current_student(self._request({"student": tampered})))
+
+    def test_a_missing_cookie_resolves_to_none(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({})))
+
+    def test_a_signed_cookie_for_a_deleted_student_resolves_to_none(self):
+        from home.identity import current_student
+        self.assertIsNone(current_student(self._request({"student": self._sign("Ghost")})))
+
+    def test_login_sets_a_signed_cookie(self):
+        # loginStudent reads POST fields "username" and "pass" (not "password").
+        response = self.client.post("/loginStudent", {
+            "username": "Real Student", "pass": "pw",
+        })
+        raw = response.cookies.get("student")
+        self.assertIsNotNone(raw)
+        self.assertNotEqual(raw.value, "Real Student")
+        self.assertIn(":", raw.value)
+
+    def test_the_cookie_set_at_login_round_trips(self):
+        """The setter and the reader must use the same salt."""
+        from home.identity import current_student
+        self.client.post("/loginStudent", {"username": "Real Student", "pass": "pw"})
+        raw = self.client.cookies["student"].value
+        self.assertEqual(current_student(self._request({"student": raw})), self.student)
+
+
+class AdminAuthorizationTests(TestCase):
+    """The admin dashboard is superuser-only."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+
+    def test_anonymous_cannot_reach_the_dashboard(self):
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_anonymous_cannot_create_a_teacher(self):
+        before = TeacherInfo.objects.count()
+        self.client.post("/adminDashboard", {
+            "name": "Injected Prof", "email": "inj@example.com",
+            "department": self.dept.pk,
+        })
+        self.assertEqual(TeacherInfo.objects.count(), before)
+
+    def test_a_plain_user_cannot_reach_the_dashboard(self):
+        self.client.force_login(User.objects.create_user(username="plain", password="pw"))
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_a_logged_in_professor_cannot_reach_the_dashboard(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof AD", unique_id="T-AD", email="ad@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, teacher)
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 302)
+
+    def test_a_superuser_can_reach_the_dashboard(self):
+        admin = User.objects.create_superuser(
+            username="root", password="pw", email="root@example.com"
+        )
+        self.client.force_login(admin)
+        self.assertEqual(self.client.get("/adminDashboard").status_code, 200)
+
+
+class StudentPasswordChangeAuthTests(TestCase):
+    """The student password page authenticates students, not teachers."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Pw Student", roll_number="080BCT970", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+
+    def test_anonymous_is_redirected(self):
+        self.assertEqual(self.client.get("/studentPasswordChange").status_code, 302)
+
+    def test_a_logged_in_teacher_is_not_treated_as_a_student(self):
+        teacher = TeacherInfo.objects.create(
+            name="Prof PW", unique_id="T-PW", email="pw@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, teacher)
+        self.assertEqual(self.client.get("/studentPasswordChange").status_code, 302)
+
+    def test_a_signed_in_student_can_change_their_password(self):
+        login_as_student(self.client, self.student)
+        self.client.post("/studentPasswordChange", {
+            "old_password": "pw", "new_password": "new-pw",
+            "confirm_password": "new-pw",
+        })
+        self.student.refresh_from_db()
+        self.assertTrue(check_password("new-pw", self.student.password))
+
+
+class UniqueCookieRetiredTests(TestCase):
+    """The unique cookie is no longer issued."""
+
+    def test_views_no_longer_read_the_unique_cookie(self):
+        import inspect
+        from home import views
+        source = inspect.getsource(views)
+        self.assertNotIn('COOKIES.get("unique")', source)
+        self.assertNotIn("COOKIES.get('unique')", source)
+
+    def test_login_does_not_set_a_unique_cookie(self):
+        dept = Department.objects.create(dept_name="BCT")
+        teacher = TeacherInfo.objects.create(
+            name="Prof RC", unique_id="T-RC", email="rc@example.com", department=dept,
+        )
+        user = User.objects.create_user(
+            username="rc", password="pw", email="rc@example.com"
+        )
+        user.first_name = "Prof RC/T-RC"
+        user.save()
+        teacher.user = user
+        teacher.save()
+        # loginTeacher's POST field is "username", but it holds the email.
+        response = self.client.post("/loginTeacher", {
+            "username": "rc@example.com", "password": "pw",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("unique", response.cookies)
+
+
+class UsernameCookieImpersonationTests(TestCase):
+    """A forged username cookie must not reach another professor's account."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.victim = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="T-UVIC", email="uvic@example.com",
+            phone="1111111111", department=self.dept,
+        )
+        self.victim_user = User.objects.create_user(
+            username="victimuser", password="victim-pw", email="uvic@example.com",
+        )
+        # The legacy "Full Name/<unique_id>" convention the account views used to
+        # walk from the cookie's User to a TeacherInfo.
+        self.victim_user.first_name = "Victim Prof/T-UVIC"
+        self.victim_user.save()
+        self.victim.user = self.victim_user
+        self.victim.save()
+        self.attacker = TeacherInfo.objects.create(
+            name="Attacker Prof", unique_id="T-UATK", email="uatk@example.com",
+            department=self.dept,
+        )
+
+    def test_a_forged_cookie_cannot_change_another_professors_password(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/userPasswordChange", {
+            "old_password": "test-pw",
+            "new_password": "hijacked",
+            "confirm_password": "hijacked",
+        })
+        self.victim_user.refresh_from_db()
+        self.assertTrue(self.victim_user.check_password("victim-pw"))
+
+    def test_a_forged_cookie_cannot_change_another_professors_email(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/changeEmail", {"new_email": "attacker@evil.example"})
+        self.victim.refresh_from_db()
+        self.victim_user.refresh_from_db()
+        self.assertNotEqual(self.victim_user.email, "attacker@evil.example")
+        self.assertNotEqual(self.victim.email, "attacker@evil.example")
+
+    def test_a_forged_cookie_cannot_change_another_professors_phone(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        before = self.victim.phone
+        self.client.post("/changePhone", {"new_phone": "9999999999"})
+        self.victim.refresh_from_db()
+        self.assertEqual(self.victim.phone, before)
+
+    def test_a_forged_cookie_cannot_change_another_professors_title(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        before = self.victim.title
+        self.client.post("/changeTitle", {"new_title": "Janitor"})
+        self.victim.refresh_from_db()
+        self.assertEqual(self.victim.title, before)
+
+    def test_an_anonymous_forged_cookie_changes_nothing(self):
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/userPasswordChange", {
+            "old_password": "victim-pw",
+            "new_password": "hijacked",
+            "confirm_password": "hijacked",
+        })
+        self.victim_user.refresh_from_db()
+        self.assertTrue(self.victim_user.check_password("victim-pw"))
+
+    def test_a_professor_can_still_change_their_own_password(self):
+        user = login_as_teacher(self.client, self.attacker)
+        self.client.post("/userPasswordChange", {
+            "old_password": "test-pw",
+            "new_password": "brand-new-pw",
+            "confirm_password": "brand-new-pw",
+        })
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("brand-new-pw"))
+
+    def test_a_professor_can_still_change_their_own_email(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.post("/changeEmail", {"new_email": "mine@example.com"})
+        self.attacker.refresh_from_db()
+        self.assertEqual(self.attacker.email, "mine@example.com")
+
+    def test_login_does_not_set_a_username_cookie(self):
+        teacher = TeacherInfo.objects.create(
+            name="Recent Prof", unique_id="T-URCU", email="rcu@example.com",
+            department=self.dept,
+        )
+        user = User.objects.create_user(
+            username="rcu", password="pw", email="rcu@example.com",
+        )
+        teacher.user = user
+        teacher.save()
+        response = self.client.post("/loginTeacher", {
+            "username": "rcu@example.com", "password": "pw",
+        })
+        self.assertNotIn("username", response.cookies)
+
+
+class ProfessorApprovalTests(TestCase):
+    """Self-registered professors are inactive until a superuser approves them."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.subject = Subject.objects.create(sub_name="Operating Systems")
+
+    def _register(self, email="new@example.com"):
+        # TeacherInfoForm requires ``confirm_password`` and ``subjects`` on top
+        # of the visible fields, and the route carries a trailing slash.
+        return self.client.post("/registerProfessor/", {
+            "name": "New Prof", "email": email, "department": self.dept.pk,
+            "subjects": [self.subject.pk],
+            "password": "signup-pw", "confirm_password": "signup-pw",
+        })
+
+    def test_a_self_registered_professor_is_inactive(self):
+        self._register()
+        user = User.objects.get(email="new@example.com")
+        self.assertFalse(user.is_active)
+
+    def test_an_unapproved_professor_cannot_log_in(self):
+        self._register()
+        self.client.post("/loginTeacher", {
+            "username": "new@example.com", "password": "signup-pw",
+        })
+        # Not signed in: no session user.
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_an_approved_professor_can_log_in(self):
+        self._register()
+        user = User.objects.get(email="new@example.com")
+        user.is_active = True
+        user.save()
+        self.client.post("/loginTeacher", {
+            "username": "new@example.com", "password": "signup-pw",
+        })
+        self.assertIn("_auth_user_id", self.client.session)
+
+    def test_the_teacher_row_is_still_created_and_linked(self):
+        # Approval gates login, not record creation - the admin needs the row
+        # in order to review and approve it.
+        self._register()
+        teacher = TeacherInfo.objects.get(email="new@example.com")
+        self.assertIsNotNone(teacher.user)
+        self.assertFalse(teacher.user.is_active)
+
+    def test_the_registrant_is_told_approval_is_pending(self):
+        response = self._register()
+        text = " ".join(str(m) for m in response.wsgi_request._messages).lower()
+        self.assertIn("approval", text)
+
+    def test_a_superuser_created_professor_is_active(self):
+        # adminDashboard creates professors deliberately; those need no approval.
+        admin = User.objects.create_superuser(
+            username="root2", password="pw", email="root2@example.com",
+        )
+        self.client.force_login(admin)
+        self.client.post("/adminDashboard", {
+            "name": "Admin Made", "email": "am@example.com",
+            "department": self.dept.pk, "subjects": [self.subject.pk],
+            "password": "pw", "confirm_password": "pw",
+        })
+        created = User.objects.get(email="am@example.com")
+        self.assertTrue(created.is_active)
+
+
+class AddSubjectsTests(TestCase):
+    """A professor can add a subject to their profile."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof AS", unique_id="T-AS", email="as@example.com",
+            department=self.dept,
+        )
+        self.subject = Subject.objects.create(sub_name="Operating Systems")
+        login_as_teacher(self.client, self.teacher)
+
+    def test_a_subject_can_be_added(self):
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertIn(self.subject, self.teacher.subjects.all())
+
+    def test_an_unknown_subject_does_not_crash(self):
+        response = self.client.post("/addSubjects", {"subject": "No Such Subject"})
+        self.assertIn(response.status_code, (200, 302))
+
+    def test_an_anonymous_request_cannot_add_a_subject(self):
+        self.client.logout()
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertNotIn(self.subject, self.teacher.subjects.all())
+
+    def test_a_subject_can_be_removed_again(self):
+        self.client.post("/addSubjects", {"subject": "Operating Systems"})
+        self.client.post("/deleteSubjects", {"subject": "Operating Systems"})
+        self.teacher.refresh_from_db()
+        self.assertNotIn(self.subject, self.teacher.subjects.all())
+
+
+class PasswordResetSecurityTests(TestCase):
+    """The unauthenticated password-reset flow must be gated on a
+    server-side OTP, not on client-set cookies (the live takeover)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="V-1", email="victim@example.com",
+            department=self.dept,
+        )
+        self.user = User.objects.create_user(
+            username="victim_V-1", password="original-pw",
+            email="victim@example.com",
+            # Legacy "Full Name/<unique_id>" convention the old otp view parses.
+            first_name="Victim Prof/V-1",
+        )
+        self.teacher.user = self.user
+        self.teacher.save(update_fields=["user"])
+
+    def _otp_from_mail(self):
+        return re.search(r"\d{5}", mail.outbox[-1].body).group()
+
+    def test_a_forged_cookie_cannot_change_a_password(self):
+        # No session, no OTP - just the cookie the old flow trusted.
+        self.client.cookies["teacher_ko_user"] = "victim_V-1"
+        self.client.post("/changePassword", {
+            "password1": "attacker-pw", "password2": "attacker-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertFalse(check_password("attacker-pw", self.user.password))
+        self.assertTrue(check_password("original-pw", self.user.password))
+
+    def test_client_controlled_otp_cannot_complete_a_reset(self):
+        # The old flow trusted a client cookie for the OTP and another for the
+        # target username. Forge both and walk the whole chain.
+        self.client.cookies["OTP_value"] = "55555"
+        self.client.cookies["teacher_ko_user"] = "victim_V-1"
+        self.client.post("/OTP_check", {"user_typed_OTP_value": "55555"})
+        self.client.post("/changePassword", {
+            "password1": "pwned-pw", "password2": "pwned-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertFalse(check_password("pwned-pw", self.user.password))
+
+    def test_changePassword_requires_a_verified_session(self):
+        self.client.post("/changePassword", {
+            "password1": "x-pw", "password2": "x-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+    def test_the_legitimate_reset_flow_works_end_to_end(self):
+        self.client.post("/otp", {"username": "victim_V-1"})
+        self.assertEqual(len(mail.outbox), 1)
+        otp = self._otp_from_mail()
+        self.client.post("/OTP_check", {"user_typed_OTP_value": otp})
+        self.assertTrue(self.client.session.get("pw_reset_verified"))
+        self.client.post("/changePassword", {
+            "password1": "brand-new-pw", "password2": "brand-new-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("brand-new-pw", self.user.password))
+        self.assertFalse(check_password("original-pw", self.user.password))
+        # Flow cleared - cannot be replayed.
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+    def test_the_reset_flow_does_not_enumerate_usernames(self):
+        import re
+        r_known = self.client.post("/otp", {"username": "victim_V-1"})
+        r_unknown = self.client.post("/otp", {"username": "ghost_nobody"})
+        self.assertEqual(r_known.status_code, r_unknown.status_code)
+
+        # The page must never echo the account's email - that both confirms the
+        # username exists and hands the attacker the address.
+        self.assertNotIn(b"victim@example.com", r_known.content)
+        self.assertNotIn(b"victim@example.com", r_unknown.content)
+
+        # Bodies must otherwise be identical. The CSRF token is regenerated per
+        # response, so normalise it before comparing rather than asserting on
+        # raw bytes.
+        def normalise(body):
+            return re.sub(rb'value="[A-Za-z0-9]{32,}"', b'value="CSRF"', body)
+
+        self.assertEqual(normalise(r_known.content), normalise(r_unknown.content))
+
+    def test_starting_a_reset_but_skipping_otp_verification_changes_nothing(self):
+        # Populate pw_reset_user via /otp, then jump straight to /changePassword
+        # without ever submitting the OTP. The pw_reset_verified gate must stop
+        # it - this is the exact control the auditor mutated to reopen the hole.
+        self.client.post("/otp", {"username": "victim_V-1"})
+        self.assertEqual(self.client.session.get("pw_reset_user"), "victim_V-1")
+        self.assertNotIn("pw_reset_verified", self.client.session)
+        self.client.post("/changePassword", {
+            "password1": "skip-otp-pw", "password2": "skip-otp-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertFalse(check_password("skip-otp-pw", self.user.password))
+
+    def test_the_otp_is_one_shot(self):
+        self.client.post("/otp", {"username": "victim_V-1"})
+        otp = self._otp_from_mail()
+        # A wrong guess consumes the OTP.
+        self.client.post("/OTP_check", {"user_typed_OTP_value": "00000"})
+        # The real OTP no longer verifies.
+        self.client.post("/OTP_check", {"user_typed_OTP_value": otp})
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+
+class ProfileRenameSecurityTests(TestCase):
+    """Renaming a login account or a student is a profile edit and must be
+    gated on the caller's own session, not on a client-supplied target name."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.prog = Program.objects.create(
+            program_name="BCT-Prog", department=self.dept,
+        )
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof R", unique_id="R-1", email="r@example.com",
+            department=self.dept,
+        )
+        self.user = User.objects.create_user(
+            username="prof_r_R-1", password="pw", email="r@example.com",
+        )
+        self.teacher.user = self.user
+        self.teacher.save(update_fields=["user"])
+        self.student = StudentLoginInfo.objects.create(
+            username="stud_original", roll_number="074BCT001",
+            department=self.dept, program=self.prog,
+            password=make_password("s-pw"), dob=date(2000, 1, 1),
+        )
+
+    def test_anonymous_cannot_rename_a_professor(self):
+        self.client.post("/changeUsername", {
+            "old_username": "prof_r_R-1", "new_username": "hacked",
+        })
+        self.assertTrue(User.objects.filter(username="prof_r_R-1").exists())
+        self.assertFalse(User.objects.filter(username="hacked").exists())
+
+    def test_anonymous_cannot_rename_a_student(self):
+        self.client.post("/changeStudentName", {
+            "old_username": "stud_original", "new_username": "hacked_student",
+        })
+        self.assertTrue(
+            StudentLoginInfo.objects.filter(username="stud_original").exists()
+        )
+        self.assertFalse(
+            StudentLoginInfo.objects.filter(username="hacked_student").exists()
+        )
+
+    def test_a_professor_can_rename_their_own_account(self):
+        login_as_teacher(self.client, self.teacher)
+        self.client.post("/changeUsername", {"new_username": "prof_renamed"})
+        self.assertTrue(User.objects.filter(username="prof_renamed").exists())
+        self.assertFalse(User.objects.filter(username="prof_r_R-1").exists())
+
+    def test_a_student_can_rename_their_own_account(self):
+        login_as_student(self.client, self.student)
+        self.client.post("/changeStudentName", {"new_username": "stud_renamed"})
+        self.assertTrue(
+            StudentLoginInfo.objects.filter(username="stud_renamed").exists()
+        )
+        self.assertFalse(
+            StudentLoginInfo.objects.filter(username="stud_original").exists()
+        )
+
+
+class SettingsHygieneTests(TestCase):
+    """Deployment-critical settings must not be hardcoded."""
+
+    def _settings_source(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        return (Path(dj.BASE_DIR) / "auth" / "settings.py").read_text()
+
+    def test_no_insecure_secret_key_literal_in_settings(self):
+        self.assertNotIn("django-insecure-", self._settings_source())
+
+    def test_no_email_password_literal_in_settings(self):
+        # The committed Gmail app password, which must no longer appear.
+        self.assertNotIn("nxdrmhpnsahduvax", self._settings_source())
+
+    def test_allowed_hosts_wildcard_is_not_hardcoded(self):
+        source = self._settings_source()
+        self.assertNotIn("ALLOWED_HOSTS = ['*'", source)
+        self.assertNotIn('ALLOWED_HOSTS = ["*"', source)
+
+    def test_an_env_example_file_documents_every_key(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        example = Path(dj.BASE_DIR) / ".env.example"
+        self.assertTrue(example.exists())
+        text = example.read_text()
+        for key in (
+            "DJANGO_SECRET_KEY", "DJANGO_DEBUG", "DJANGO_ALLOWED_HOSTS",
+            "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, text)
+
+    def test_the_real_env_file_is_gitignored(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        self.assertIn(".env", (Path(dj.BASE_DIR) / ".gitignore").read_text())
+
+
+class SecuritySettingsTests(TestCase):
+    """Production-grade cookie and transport settings are configured."""
+
+    def test_clickjacking_protection_is_not_disabled(self):
+        from django.conf import settings as dj
+        self.assertNotEqual(dj.X_FRAME_OPTIONS, "ALLOWALL")
+        self.assertIn(dj.X_FRAME_OPTIONS, ("DENY", "SAMEORIGIN"))
+
+    def test_framing_is_denied_outright(self):
+        # security.W019: nothing in this app frames itself, so SAMEORIGIN buys
+        # nothing and DENY is the correct value.
+        from django.conf import settings as dj
+        self.assertEqual(dj.X_FRAME_OPTIONS, "DENY")
+
+    def test_session_cookies_are_httponly(self):
+        from django.conf import settings as dj
+        self.assertTrue(dj.SESSION_COOKIE_HTTPONLY)
+
+    def test_content_type_sniffing_is_disabled(self):
+        from django.conf import settings as dj
+        self.assertTrue(dj.SECURE_CONTENT_TYPE_NOSNIFF)
+
+    def test_samesite_is_set_on_session_and_csrf_cookies(self):
+        from django.conf import settings as dj
+        self.assertEqual(dj.SESSION_COOKIE_SAMESITE, "Lax")
+        self.assertEqual(dj.CSRF_COOKIE_SAMESITE, "Lax")
+
+    def test_secure_cookies_follow_debug(self):
+        # In DEBUG (local HTTP) secure cookies must be off or nothing works;
+        # with DEBUG off they must be on.
+        #
+        # Compare against auth.settings.DEBUG, not django.conf.settings.DEBUG:
+        # the test runner forces settings.DEBUG to False for the duration of
+        # the run, so django.conf would report False no matter how the app is
+        # actually configured. The module attribute is the value the secure
+        # cookie flags were computed from.
+        from django.conf import settings as dj
+        from auth.settings import DEBUG as CONFIGURED_DEBUG
+        self.assertEqual(dj.SESSION_COOKIE_SECURE, not CONFIGURED_DEBUG)
+        self.assertEqual(dj.CSRF_COOKIE_SECURE, not CONFIGURED_DEBUG)
+
+
+class ProductionGuardTests(TestCase):
+    """Running with DEBUG off and a default secret must fail loudly."""
+
+    def test_the_guard_function_exists(self):
+        from auth.settings import check_production_config
+        self.assertTrue(callable(check_production_config))
+
+    def test_it_rejects_the_dev_secret_key_when_debug_is_off(self):
+        from auth.settings import DEV_SECRET_KEY, check_production_config
+        with self.assertRaises(Exception) as ctx:
+            check_production_config(
+                debug=False, secret_key=DEV_SECRET_KEY, allowed_hosts=["example.com"],
+            )
+        self.assertIn("DJANGO_SECRET_KEY", str(ctx.exception))
+
+    def test_it_rejects_an_empty_secret_key_when_debug_is_off(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception):
+            check_production_config(
+                debug=False, secret_key="", allowed_hosts=["example.com"],
+            )
+
+    def test_it_rejects_a_wildcard_host_when_debug_is_off(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception) as ctx:
+            check_production_config(
+                debug=False, secret_key="a-real-key", allowed_hosts=["*"],
+            )
+        self.assertIn("ALLOWED_HOSTS", str(ctx.exception))
+
+    def test_a_wildcard_mixed_with_real_hosts_is_still_rejected(self):
+        from auth.settings import check_production_config
+        with self.assertRaises(Exception):
+            check_production_config(
+                debug=False, secret_key="a-real-key",
+                allowed_hosts=["example.com", "*"],
+            )
+
+    def test_it_permits_a_correct_production_configuration(self):
+        from auth.settings import check_production_config
+        check_production_config(
+            debug=False, secret_key="a-real-key", allowed_hosts=["example.com"],
+        )
+
+    def test_it_permits_anything_in_development(self):
+        from auth.settings import DEV_SECRET_KEY, check_production_config
+        check_production_config(
+            debug=True, secret_key=DEV_SECRET_KEY, allowed_hosts=["*"],
+        )
+
+
+class SafeMailTests(TestCase):
+    """SMTP failures are logged, not propagated into the request."""
+
+    def test_a_failing_send_does_not_propagate(self):
+        with mock.patch(
+            "home.views.send_mail", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR") as captured:
+                result = _views.send_mail_safely(
+                    "Subject", "Body", "from@example.com", ["to@example.com"],
+                )
+        self.assertFalse(result)
+        self.assertIn("to@example.com", "\n".join(captured.output))
+
+    def test_a_successful_send_returns_true(self):
+        result = _views.send_mail_safely(
+            "Subject", "Body", "from@example.com", ["to@example.com"],
+        )
+        self.assertTrue(result)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_failing_admin_send_does_not_propagate(self):
+        with mock.patch(
+            "home.views.mail_admins", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR"):
+                result = _views.mail_admins_safely("Subject", "Body")
+        self.assertFalse(result)
+
+    def test_teacher_creation_still_commits_when_mail_fails(self):
+        # The regression this guards: the notification fires *after*
+        # teacher_info.save(), so an SMTP error used to 500 the request and
+        # leave a created-but-unreported account behind.
+        dept = Department.objects.create(dept_name="SafeMailDept")
+        subject = Subject.objects.create(sub_name="SafeMailSubject")
+        admin = User.objects.create_superuser(
+            username="mailroot", password="pw", email="mailroot@example.com",
+        )
+        self.client.force_login(admin)
+        with mock.patch(
+            "home.views.send_mail", side_effect=Exception("smtp is down")
+        ):
+            with self.assertLogs("home.views", level="ERROR"):
+                response = self.client.post("/adminDashboard", {
+                    "name": "Mail Fails", "email": "mailfails@example.com",
+                    "department": dept.pk, "subjects": [subject.pk],
+                    "password": "pw", "confirm_password": "pw",
+                })
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            TeacherInfo.objects.filter(email="mailfails@example.com").exists()
+        )
+        self.assertTrue(User.objects.filter(email="mailfails@example.com").exists())
+
+
+class CsrfProtectionTests(TestCase):
+    """CSRF middleware is active and every POST form carries a token."""
+
+    def test_the_middleware_is_enabled(self):
+        from django.conf import settings as dj
+        self.assertIn("django.middleware.csrf.CsrfViewMiddleware", dj.MIDDLEWARE)
+
+    def test_every_post_form_template_has_a_token(self):
+        import re
+        from pathlib import Path
+        from django.conf import settings as dj
+        offenders = []
+        for path in sorted((Path(dj.BASE_DIR) / "templates").rglob("*.html")):
+            text = path.read_text(errors="replace")
+            for match in re.finditer(
+                r"<form[^>]*method=[\"']post[\"'][^>]*>", text, re.I
+            ):
+                tail = text[match.end():match.end() + 400]
+                if "csrf_token" not in tail:
+                    line = text[:match.start()].count("\n") + 1
+                    offenders.append(f"{path.name}:{line}")
+        self.assertEqual(offenders, [], f"POST forms without a CSRF token: {offenders}")
+
+    def test_a_post_without_a_token_is_rejected(self):
+        from django.test import Client
+        enforcing = Client(enforce_csrf_checks=True)
+        response = enforcing.post("/loginAdmin", {"username": "x", "password": "y"})
+        self.assertEqual(response.status_code, 403)
+
+
+class StaleStudentCookieTests(TestCase):
+    """A pre-signing cookie must send the student to log in, not a blank page."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="Stale Student", roll_number="080BCT990", department=self.dept,
+            program=self.program, password=make_password("pw"), dob="2000-01-01",
+        )
+
+    def test_an_unsigned_legacy_cookie_redirects_to_login(self):
+        # This is exactly what a browser holds after the signing change shipped.
+        self.client.cookies["student"] = "Stale Student"
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginStudent", response["Location"])
+
+    def test_no_cookie_redirects_to_login(self):
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_signed_cookie_still_reaches_the_profile(self):
+        login_as_student(self.client, self.student)
+        response = self.client.get("/studentDetails")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "080BCT990")

@@ -12,26 +12,76 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 import os
 from pathlib import Path
 from django.contrib.messages import constants as messages
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def env(name, default=None):
+    """Read a setting from the environment, falling back to a dev-safe default."""
+    return os.environ.get(name, default)
+
+
+def env_bool(name, default=False):
+    return env(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in env(name, default).split(",") if item.strip()]
+
+
+# Load a local .env if present. Deliberately hand-rolled: adding python-dotenv
+# would mean editing requirements.txt, which is UTF-16 encoded and fragile.
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key, _, _value = _line.partition("=")
+        os.environ.setdefault(_key.strip(), _value.strip())
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-1c(@@0$o-xebj!h&9#lp=70m_9)=axidw!o^%e1w^k*1x7xcwi'
+DEV_SECRET_KEY = "dev-only-insecure-key-do-not-use-in-production"
+
+SECRET_KEY = env("DJANGO_SECRET_KEY", DEV_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-# DEBUG = False
+DEBUG = env_bool("DJANGO_DEBUG", True)
 
-ALLOWED_HOSTS = ['*', 'recommendation-generator.bct.itclub.pp.ua']
-CSRF_TRUSTED_ORIGINS = [
-    'https://recommendation-generator.bct.itclub.pp.ua',
-    'http://recommendation-generator.bct.itclub.pp.ua',  # Include http as well if necessary
-]
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+CSRF_TRUSTED_ORIGINS = env_list(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000",
+)
+
+
+def check_production_config(debug, secret_key, allowed_hosts):
+    """Refuse to run with development defaults once DEBUG is off."""
+    if debug:
+        return
+    if not secret_key or secret_key == DEV_SECRET_KEY:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set to a real value when DJANGO_DEBUG is "
+            "false. Generate one with: python -c \"from "
+            "django.core.management.utils import get_random_secret_key; "
+            "print(get_random_secret_key())\""
+        )
+    if "*" in allowed_hosts:
+        raise ImproperlyConfigured(
+            "ALLOWED_HOSTS must not contain '*' when DJANGO_DEBUG is false. "
+            "Set DJANGO_ALLOWED_HOSTS to the hostnames you actually serve."
+        )
+
+
+check_production_config(DEBUG, SECRET_KEY, ALLOWED_HOSTS)
+
 #admin
 ADMINS = [('admin', 'recoioe@gmail.com')]
 
@@ -61,7 +111,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -131,6 +181,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+import sys
+
+if "test" in sys.argv:
+    # PBKDF2 is deliberately slow; the suite creates hundreds of users.
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/3.2/topics/i18n/
@@ -169,9 +225,32 @@ MEDIA_URL='/media/'
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "ioerecoletter@gmail.com"
-EMAIL_HOST_PASSWORD = "nxdrmhpnsahduvax"
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
-X_FRAME_OPTIONS = 'ALLOWALL'
+# Nothing in this app frames itself -- there is no <iframe>, <embed> or <object>
+# in any template -- so the stricter value costs nothing and closes clickjacking
+# against the letter-generation and account-management POST forms.
+X_FRAME_OPTIONS = "DENY"
+
+# --- Security -------------------------------------------------------------
+# Settings that would break plain-HTTP local development are tied to DEBUG.
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+if not DEBUG:
+    # Behind a TLS-terminating proxy, tell Django how to detect HTTPS.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
+    SECURE_HSTS_SECONDS = int(env("DJANGO_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = False

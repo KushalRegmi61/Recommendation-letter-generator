@@ -1,7 +1,7 @@
 {% extends 'base2.html' %}
 
 {% block title %}Edit Details{% endblock title %}
-{% block teacher %}<a href="teacher"><img src="{{teacher.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endblock teacher %}
+{% block teacher %}{% if teacher.images %}<a href="teacher"><img src="{{teacher.images.url}}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
 
 {% block body %}
   <div class="container" style="margin-top:50px; max-width: 1100px; max-height: 1000px;">
@@ -9,7 +9,7 @@
       <div class="row g-0">
         <div class="col-md-6">
           <div class="row">
-            <img src="{{teacher.images.url}}" style="width:350px;height:300px; margin:10px;">
+            {% if teacher.images %}<img src="{{teacher.images.url}}" style="width:350px;height:300px; margin:10px;">{% endif %}
           </div>
           <div class="row-1">
 
@@ -69,6 +69,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="changeUsername" method="POST">
+                    {% csrf_token %}
 
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Username</h5>
@@ -107,6 +108,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="changeTitle" method="POST">
+                    {% csrf_token %}
 
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Title</h5>
@@ -145,6 +147,7 @@
                   </div>
                   <div class="modal-body">
                     <form id="my-form" method="POST">
+                    {% csrf_token %}
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;"> Subjects</h5>
                       <select name='subject' >
@@ -182,6 +185,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="changePhone" method="POST">
+                    {% csrf_token %}
 
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Phone Number</h5>
@@ -223,6 +227,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="changeEmail" method="POST">
+                    {% csrf_token %}
 
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Email</h5>
@@ -263,6 +268,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="userPasswordChange" method="POST">
+                    {% csrf_token %}
                       
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Password</h5>
                       <input type="password" class="form-control" id="myInput" name="old_password"

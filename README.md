@@ -141,17 +141,23 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ### Admin
 - Manage programs, departments, teachers, templates, and all application data via `/admin/`.
 
-> **Note on PDF export.** The PDF writer only supports Latin-1 characters. The starter templates
-> are plain ASCII for this reason. Characters outside Latin-1 — em dashes, curly quotes, or a name
-> written in Devanagari — are replaced with `?` in the PDF. The DOCX export is unaffected and
-> renders them correctly.
+> **Note on PDF export.** Letters are rendered with an embedded DejaVu Sans subset
+> (`static/fonts/dejavu/DejaVuSans.ttf`), so accented Latin, Greek and Cyrillic text — along with
+> em dashes and curly quotes — exports correctly. **Devanagari is not covered by this font**, and
+> a Devanagari name will come out as blank/tofu boxes rather than readable text. Supporting it
+> needs both a Devanagari-capable TTF added to `static/fonts/` with `_UNICODE_FONT_PATH` in
+> `home/letters.py` pointed at it, *and* a PDF engine that performs complex text shaping — `fpdf`
+> 1.7.2 does not reorder matras or form conjuncts, so a Devanagari font alone is not sufficient.
+> If the font file is missing entirely the exporter falls back to Latin-1 and replaces
+> unsupported characters with `?`. The DOCX export has never had this limitation and renders
+> any script correctly.
 
 ---
 
 ## Running tests
 
 ```bash
-python manage.py test home                          # run the app's test suite (228 tests)
+python manage.py test home                          # run the app's test suite (345 tests)
 python manage.py test home.tests.ModelFieldTests    # a single test class
 ```
 
@@ -162,15 +168,54 @@ in the output are expected, not failures. Look at the final `OK`.
 
 ## Email / SMTP
 
-Email (OTP and notifications) uses Gmail SMTP configured in `auth/settings.py`. If you hit an
-SMTP authentication error, generate a Gmail **App Password** for a valid account and set
-`EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` in `auth/settings.py`.
+Email (OTP and notifications) uses Gmail SMTP. Credentials come from the environment —
+set `EMAIL_HOST_USER` and `EMAIL_HOST_PASSWORD` in your `.env` (or as real environment
+variables in production) using a Gmail **App Password**, not the account password.
 
-> **Security note:** `auth/settings.py` currently contains a committed `SECRET_KEY`,
-> `DEBUG = True`, `ALLOWED_HOSTS = ['*']`, and email credentials. Rotate these and move them
-> to environment variables before deploying anywhere public.
+With those unset, mail simply does not send — no request fails because of it. The four sites
+that previously raised on an SMTP error (username recovery, both contact-form sends, and
+teacher account creation) now route through `send_mail_safely` / `mail_admins_safely`, which
+log the failure at ERROR level instead of breaking a request that has already written to the
+database. Three notification sends (letter generated, new application, OTP) still use Django's
+`fail_silently=True` directly, so they degrade quietly but log nothing.
+
+> **Security note:** `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and the email credentials now come
+> from the environment (see [Deployment](#deployment)), and the app refuses to start with
+> development defaults when `DJANGO_DEBUG=false`. **The credentials previously committed to this
+> repository remain in git history and must be rotated** — removing them from the current files
+> does not un-publish them.
 
 ---
+
+## Deployment
+
+Configuration comes from the environment. Copy `.env.example` to `.env` for local development;
+in production set real environment variables rather than shipping a `.env` file.
+
+| Variable | Required in production | Notes |
+|---|---|---|
+| `DJANGO_SECRET_KEY` | **yes** | The app refuses to start with the dev default when `DJANGO_DEBUG=false`. |
+| `DJANGO_DEBUG` | **yes** (`false`) | Defaults to `true` so a fresh clone runs. |
+| `DJANGO_ALLOWED_HOSTS` | **yes** | Comma-separated. `*` is rejected when `DEBUG` is off. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | yes, if behind a proxy | Comma-separated, scheme included. |
+| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | for OTP and notification mail | A Gmail **app password**, not the account password. |
+
+Before deploying:
+
+```bash
+DJANGO_DEBUG=false DJANGO_SECRET_KEY=... DJANGO_ALLOWED_HOSTS=your.host \
+  python manage.py check --deploy
+```
+
+> **The credentials previously committed to this repository are compromised and must be rotated.**
+> The old `SECRET_KEY` and the Gmail app password are in the git history and cannot be removed by
+> deleting them from the current files. Generate a new secret key, revoke the old Gmail app
+> password and issue a new one. Note that rotating `SECRET_KEY` invalidates every active session
+> **and every signed student cookie**, so all users are logged out on that deploy.
+
+> **Still not addressed:** the database is SQLite committed to the repository, which is unsuitable
+> for concurrent production use. `dj_database_url` is already imported in `auth/settings.py` with a
+> commented-out Postgres block; switching is separate work.
 
 ## Project layout
 
