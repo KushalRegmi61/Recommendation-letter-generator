@@ -1,9 +1,11 @@
 import os
+import re
 import tempfile
 from datetime import date, datetime
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AnonymousUser, User
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase, SimpleTestCase, override_settings
@@ -3349,3 +3351,149 @@ class AddSubjectsTests(TestCase):
         self.client.post("/deleteSubjects", {"subject": "Operating Systems"})
         self.teacher.refresh_from_db()
         self.assertNotIn(self.subject, self.teacher.subjects.all())
+
+
+class PasswordResetSecurityTests(TestCase):
+    """The unauthenticated password-reset flow must be gated on a
+    server-side OTP, not on client-set cookies (the live takeover)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="V-1", email="victim@example.com",
+            department=self.dept,
+        )
+        self.user = User.objects.create_user(
+            username="victim_V-1", password="original-pw",
+            email="victim@example.com",
+            # Legacy "Full Name/<unique_id>" convention the old otp view parses.
+            first_name="Victim Prof/V-1",
+        )
+        self.teacher.user = self.user
+        self.teacher.save(update_fields=["user"])
+
+    def _otp_from_mail(self):
+        return re.search(r"\d{5}", mail.outbox[-1].body).group()
+
+    def test_a_forged_cookie_cannot_change_a_password(self):
+        # No session, no OTP - just the cookie the old flow trusted.
+        self.client.cookies["teacher_ko_user"] = "victim_V-1"
+        self.client.post("/changePassword", {
+            "password1": "attacker-pw", "password2": "attacker-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertFalse(check_password("attacker-pw", self.user.password))
+        self.assertTrue(check_password("original-pw", self.user.password))
+
+    def test_client_controlled_otp_cannot_complete_a_reset(self):
+        # The old flow trusted a client cookie for the OTP and another for the
+        # target username. Forge both and walk the whole chain.
+        self.client.cookies["OTP_value"] = "55555"
+        self.client.cookies["teacher_ko_user"] = "victim_V-1"
+        self.client.post("/OTP_check", {"user_typed_OTP_value": "55555"})
+        self.client.post("/changePassword", {
+            "password1": "pwned-pw", "password2": "pwned-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertFalse(check_password("pwned-pw", self.user.password))
+
+    def test_changePassword_requires_a_verified_session(self):
+        self.client.post("/changePassword", {
+            "password1": "x-pw", "password2": "x-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+    def test_the_legitimate_reset_flow_works_end_to_end(self):
+        self.client.post("/otp", {"username": "victim_V-1"})
+        self.assertEqual(len(mail.outbox), 1)
+        otp = self._otp_from_mail()
+        self.client.post("/OTP_check", {"user_typed_OTP_value": otp})
+        self.assertTrue(self.client.session.get("pw_reset_verified"))
+        self.client.post("/changePassword", {
+            "password1": "brand-new-pw", "password2": "brand-new-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("brand-new-pw", self.user.password))
+        self.assertFalse(check_password("original-pw", self.user.password))
+        # Flow cleared - cannot be replayed.
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+    def test_the_reset_flow_does_not_enumerate_usernames(self):
+        r_known = self.client.post("/otp", {"username": "victim_V-1"})
+        r_unknown = self.client.post("/otp", {"username": "ghost_nobody"})
+        self.assertEqual(r_known.status_code, r_unknown.status_code)
+        self.assertEqual(
+            [t.name for t in r_known.templates if t.name],
+            [t.name for t in r_unknown.templates if t.name],
+        )
+
+    def test_the_otp_is_one_shot(self):
+        self.client.post("/otp", {"username": "victim_V-1"})
+        otp = self._otp_from_mail()
+        # A wrong guess consumes the OTP.
+        self.client.post("/OTP_check", {"user_typed_OTP_value": "00000"})
+        # The real OTP no longer verifies.
+        self.client.post("/OTP_check", {"user_typed_OTP_value": otp})
+        self.assertNotIn("pw_reset_verified", self.client.session)
+
+
+class ProfileRenameSecurityTests(TestCase):
+    """Renaming a login account or a student is a profile edit and must be
+    gated on the caller's own session, not on a client-supplied target name."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.prog = Program.objects.create(
+            program_name="BCT-Prog", department=self.dept,
+        )
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof R", unique_id="R-1", email="r@example.com",
+            department=self.dept,
+        )
+        self.user = User.objects.create_user(
+            username="prof_r_R-1", password="pw", email="r@example.com",
+        )
+        self.teacher.user = self.user
+        self.teacher.save(update_fields=["user"])
+        self.student = StudentLoginInfo.objects.create(
+            username="stud_original", roll_number="074BCT001",
+            department=self.dept, program=self.prog,
+            password=make_password("s-pw"), dob=date(2000, 1, 1),
+        )
+
+    def test_anonymous_cannot_rename_a_professor(self):
+        self.client.post("/changeUsername", {
+            "old_username": "prof_r_R-1", "new_username": "hacked",
+        })
+        self.assertTrue(User.objects.filter(username="prof_r_R-1").exists())
+        self.assertFalse(User.objects.filter(username="hacked").exists())
+
+    def test_anonymous_cannot_rename_a_student(self):
+        self.client.post("/changeStudentName", {
+            "old_username": "stud_original", "new_username": "hacked_student",
+        })
+        self.assertTrue(
+            StudentLoginInfo.objects.filter(username="stud_original").exists()
+        )
+        self.assertFalse(
+            StudentLoginInfo.objects.filter(username="hacked_student").exists()
+        )
+
+    def test_a_professor_can_rename_their_own_account(self):
+        login_as_teacher(self.client, self.teacher)
+        self.client.post("/changeUsername", {"new_username": "prof_renamed"})
+        self.assertTrue(User.objects.filter(username="prof_renamed").exists())
+        self.assertFalse(User.objects.filter(username="prof_r_R-1").exists())
+
+    def test_a_student_can_rename_their_own_account(self):
+        login_as_student(self.client, self.student)
+        self.client.post("/changeStudentName", {"new_username": "stud_renamed"})
+        self.assertTrue(
+            StudentLoginInfo.objects.filter(username="stud_renamed").exists()
+        )
+        self.assertFalse(
+            StudentLoginInfo.objects.filter(username="stud_original").exists()
+        )

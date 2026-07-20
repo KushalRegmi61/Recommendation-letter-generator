@@ -935,7 +935,12 @@ def logoutUser(request):
     response.delete_cookie('unique')
     response.delete_cookie('csrftoken')
     response.delete_cookie('username')
+    # The reset flow no longer issues these identity cookies (the OTP lives in
+    # the session now), but clear any stale ones a browser still holds from an
+    # earlier release so they cannot linger.
     response.delete_cookie('OTP_value')
+    response.delete_cookie('teacher_ko_user')
+    response.delete_cookie('teacher_ko_naam')
     return response
 
 def logoutStudent(request):
@@ -944,19 +949,16 @@ def logoutStudent(request):
     return response
 
 def forgotPassword(request):
-    # generating otp so that it is generated only once
-    OTP_value = OTP_generator(5)
-    response = render(request, "forgotPassword.html")
-    response.set_cookie("OTP_value", OTP_value)
-    return response
+    # The OTP is now generated and stored server-side in the ``otp`` view, not
+    # handed to the client in a cookie the attacker could read or forge.
+    return render(request, "forgotPassword.html")
 
 
 def forgotUsername(request):
-    # generating otp so that it is generated only once
-    OTP_value = OTP_generator(5)
-    response = render(request, "forgotUsername.html")
-    response.set_cookie("OTP_value", OTP_value)
-    return response
+    # No OTP cookie: this username-recovery flow finishes in ``checkEmail``,
+    # which never consulted the OTP, so the cookie was dead weight and a
+    # client-writable value that the reset flow used to trust.
+    return render(request, "forgotUsername.html")
 
 
 # check email of username is valid or not
@@ -983,65 +985,66 @@ def checkEmail(request):
 
 # OTP
 def otp(request):
+    """Start a password reset: generate an OTP, keep it server-side, email it.
 
-    if request.method == "POST":
-        Usernaam = request.POST.get("username")
-        if User.objects.filter(username=Usernaam).exists():
-            sir = User.objects.get(username=Usernaam)
-            full_name = sir.get_full_name()
-            x = full_name.split("/")
-            name = x[0]
-            id = x[-1]
+    The secret and the target username live in the Django session (server-side
+    and signed), never in a client cookie. The response is identical whether or
+    not the submitted username exists, so this cannot be used to enumerate
+    accounts.
+    """
+    if request.method != "POST":
+        return redirect("forgotPassword")
 
-            if TeacherInfo.objects.filter(unique_id=id).exists():
-                master = TeacherInfo.objects.get(unique_id=id)
+    username = request.POST.get("username")
+    user = User.objects.filter(username=username).first()
 
-                OTP_value = request.COOKIES.get("OTP_value")
+    # Generate and store the OTP regardless, so timing/branching does not leak
+    # whether the account exists. Only a real account gets the email, so an
+    # attacker guessing a username can never learn the OTP.
+    otp_value = str(OTP_generator(5))
+    request.session["pw_reset_otp"] = otp_value
+    request.session["pw_reset_user"] = username or ""
+    request.session.pop("pw_reset_verified", None)
 
-                send_mail(
-                    "OTP ",
-                    "Your OTP for Recoomendation Letter is " + str(OTP_value),
-                    "recoioe@gmail.com",
-                    [master.email],
-                    fail_silently=False,
-                )
+    master = None
+    if user is not None:
+        master = TeacherInfo.objects.filter(user=user).first()
+        send_mail(
+            "OTP ",
+            "Your OTP for Recoomendation Letter is " + otp_value,
+            "recoioe@gmail.com",
+            [user.email],
+            fail_silently=True,
+        )
 
-                response = render(
-                    request,
-                    "otp.html",
-                    {"teacherkonam": master, "OTP_value": OTP_value},
-                )
-                # making cookies to store and send them to other view page
-
-                response.set_cookie("teacher_ko_naam", master)
-                response.set_cookie("teacher_ko_user", Usernaam)
-                return response
-
-            else:
-                messages.error(request, "Sorry You are not registered as a Professor.")
-                return render(request, "loginTeacher.html")
-
-        else:
-            messages.error(request, "Sorry You are not registered as a Professor.")
-            return render(request, "loginTeacher.html")
+    # Same page either way; ``master`` may be None for an unknown username.
+    return render(request, "otp.html", {"teacherkonam": master})
 
 
 # Otp check
 def OTP_check(request):
-    if request.method == "POST":
-        user_OTP_value = request.POST.get("user_typed_OTP_value")
+    """Verify the submitted OTP against the server-side session value.
 
-        # using cookies to obtain otp value and teacher
-        OTP_value = request.COOKIES.get("OTP_value")
-        teacher_ko_naam = request.COOKIES.get("teacher_ko_naam")
+    One-shot: the stored OTP is popped on the first attempt, so it cannot be
+    brute-forced across requests. Only a correct guess sets the short-lived
+    ``pw_reset_verified`` flag that ``changePassword`` requires.
+    """
+    if request.method != "POST":
+        return redirect("loginTeacher")
 
-        if OTP_value == user_OTP_value:
-            return render(
-                request, "validatePassword.html", {"teacher_ko_naam": teacher_ko_naam}
-            )
-        else:
-            messages.error(request, "Wrong OTP_value")
-            return render(request, "loginTeacher.html")
+    user_OTP_value = request.POST.get("user_typed_OTP_value")
+    real_OTP_value = request.session.pop("pw_reset_otp", None)
+
+    if real_OTP_value is not None and user_OTP_value == real_OTP_value:
+        request.session["pw_reset_verified"] = True
+        return render(
+            request,
+            "validatePassword.html",
+            {"teacher_ko_naam": request.session.get("pw_reset_user")},
+        )
+
+    messages.error(request, "Wrong OTP_value")
+    return render(request, "loginTeacher.html")
 
 
 # #to pass the username and to validate the user
@@ -1054,24 +1057,45 @@ def OTP_check(request):
 
 # pwd is changed of corresponding user passed from validatePassword
 def changePassword(request):
+    """Reset the password for the account that completed the OTP flow.
 
-    if request.method == "POST":
-        password1 = request.POST.get("password1")
-        password2 = request.POST.get("password2")
+    Gated on the server-side ``pw_reset_verified`` flag and the target username
+    stored in the session by ``otp`` - never a client cookie. The three reset
+    keys are cleared afterward so the flow cannot be replayed.
+    """
+    if request.method != "POST":
+        return redirect("loginTeacher")
 
-    if password1 == password2:
-        # Teacher ko Username using cookies from 'otp' view page
-        teacher_ko_user_naam = request.COOKIES.get("teacher_ko_user")
+    if not request.session.get("pw_reset_verified"):
+        messages.error(
+            request,
+            "Your password reset could not be verified. Please start again.",
+        )
+        return redirect("loginTeacher")
 
-        # changing Pwd
-        usr = User.objects.get(username=teacher_ko_user_naam)
+    password1 = request.POST.get("password1")
+    password2 = request.POST.get("password2")
+
+    if not password1 or password1 != password2:
+        messages.error(request, "Passwords do not match.")
+        return render(
+            request,
+            "validatePassword.html",
+            {"teacher_ko_naam": request.session.get("pw_reset_user")},
+        )
+
+    username = request.session.get("pw_reset_user")
+    usr = User.objects.filter(username=username).first()
+    if usr is not None:
         usr.set_password(password1)
         usr.save()
-        messages.success(request, "Password has been changed successfully.")
-        return render(request, "loginTeacher.html")
-    else:
 
-        return render(request, "validatePassword.html")
+    # One-time: tear the whole flow down so it cannot be replayed.
+    for key in ("pw_reset_otp", "pw_reset_user", "pw_reset_verified"):
+        request.session.pop(key, None)
+
+    messages.success(request, "Password has been changed successfully.")
+    return render(request, "loginTeacher.html")
 
 
 def OTP_generator(n):
@@ -1188,44 +1212,59 @@ def profileUpdateRequest(request):
 
 
 def changeUsername(request):
+    # Editing a professor's own login account. Identity comes from the session
+    # via current_teacher(); the caller can only rename themselves, not an
+    # arbitrary account named in a client-supplied "old_username".
     if request.method == "POST":
-        old_username = request.POST.get("old_username")
+        teacher = current_teacher(request)
+        if teacher is None:
+            return redirect("/loginTeacher")
+        user = teacher.user
+        if user is None:
+            messages.error(request, "No login account is linked to this professor.")
+            return redirect(userDetails)
+
         new_username = request.POST.get("new_username")
+        if not new_username:
+            messages.error(request, "Please provide a new username.")
+            return redirect(userDetails)
+        if User.objects.filter(username=new_username).exclude(pk=user.pk).exists():
+            messages.error(request, "Username already exists.")
+            return redirect(userDetails)
 
-        if User.objects.filter(username=old_username).exists():
-            if User.objects.filter(username=new_username).exists():
-                messages.error(request, "Username already exists.")
-                return redirect(userDetails)
-
-            user = User.objects.get(username=old_username)
-            user.username = new_username
-            user.save()
-            messages.success(request, "Username has been changed successfully.")
-            return redirect(loginTeacher)
-        else:
-            messages.error(request, "No such username exists. ")
+        user.username = new_username
+        user.save()
+        messages.success(request, "Username has been changed successfully.")
+        return redirect(loginTeacher)
     return redirect(userDetails)
 
 def changeStudentName(request):
+    # Editing a student's own account. Identity comes from the signed student
+    # cookie via current_student(); the caller cannot rename another student by
+    # supplying their name.
     if request.method == "POST":
-        old_username = request.POST.get("old_username")
+        student = current_student(request)
+        if student is None:
+            return redirect("/loginStudent")
+
         new_username = request.POST.get("new_username")
-
-        if StudentLoginInfo.objects.filter(username=old_username).exists():
-            if StudentLoginInfo.objects.filter(username=new_username).exists():
-                messages.error(request, "Student already exists.")
-                return redirect(studentDetails)
-
-            student = StudentLoginInfo.objects.get(username=old_username)
-            student.username = new_username
-            student.save()
-            messages.success(request, "Your username has been changed successfully.")
-            response = redirect(loginStudent)
-            response.delete_cookie('student')
-            return response
-        else:
-            messages.error(request, "No such student exists. ")
+        if not new_username:
+            messages.error(request, "Please provide a new username.")
             return redirect(studentDetails)
+        if StudentLoginInfo.objects.filter(username=new_username).exclude(
+            pk=student.pk
+        ).exists():
+            messages.error(request, "Student already exists.")
+            return redirect(studentDetails)
+
+        student.username = new_username
+        student.save()
+        messages.success(request, "Your username has been changed successfully.")
+        # The signed cookie still carries the old name, so drop it and make the
+        # student log in again under the new one.
+        response = redirect(loginStudent)
+        response.delete_cookie('student')
+        return response
     return redirect(studentDetails)
 
 
