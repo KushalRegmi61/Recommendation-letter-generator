@@ -3521,3 +3521,42 @@ class ProfileRenameSecurityTests(TestCase):
         self.assertFalse(
             StudentLoginInfo.objects.filter(username="stud_original").exists()
         )
+
+
+class SettingsHygieneTests(TestCase):
+    """Deployment-critical settings must not be hardcoded."""
+
+    def _settings_source(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        return (Path(dj.BASE_DIR) / "auth" / "settings.py").read_text()
+
+    def test_no_insecure_secret_key_literal_in_settings(self):
+        self.assertNotIn("django-insecure-", self._settings_source())
+
+    def test_no_email_password_literal_in_settings(self):
+        # The committed Gmail app password, which must no longer appear.
+        self.assertNotIn("nxdrmhpnsahduvax", self._settings_source())
+
+    def test_allowed_hosts_wildcard_is_not_hardcoded(self):
+        source = self._settings_source()
+        self.assertNotIn("ALLOWED_HOSTS = ['*'", source)
+        self.assertNotIn('ALLOWED_HOSTS = ["*"', source)
+
+    def test_an_env_example_file_documents_every_key(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        example = Path(dj.BASE_DIR) / ".env.example"
+        self.assertTrue(example.exists())
+        text = example.read_text()
+        for key in (
+            "DJANGO_SECRET_KEY", "DJANGO_DEBUG", "DJANGO_ALLOWED_HOSTS",
+            "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, text)
+
+    def test_the_real_env_file_is_gitignored(self):
+        from pathlib import Path
+        from django.conf import settings as dj
+        self.assertIn(".env", (Path(dj.BASE_DIR) / ".gitignore").read_text())

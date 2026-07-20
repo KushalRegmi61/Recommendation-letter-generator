@@ -1,6 +1,9 @@
 # Claude Code local guidance file — never commit
 CLAUDE.md
 
+# Local environment configuration - never commit
+.env
+
 # Local scratch: Google Form screenshots, not part of the app
 googleform-ss/
 
