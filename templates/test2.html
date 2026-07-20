@@ -11,18 +11,20 @@
         </div>
     </div>
 </div>
-<!-- hidden textarea to hold the edited version when submitting -->
-<textarea id="edited_letter" name="edited_letter" style="display:none;"></textarea>
 <div style="text-align:center; margin-top:30px; display: flex; justify-content: center; gap: 20px;">
     <form method="post" action="/download_letter/" id="pdfForm" style="display:inline;" onsubmit="prepareEdit()">
         {% csrf_token %}
         <input type="hidden" name="roll" value="{{student.std.roll_number}}">
+        <input type="hidden" name="template_id" value="{{ template_id }}">
+        <textarea name="edited_letter" class="edited_letter" style="display:none;"></textarea>
         <input type="hidden" name="format" value="pdf">
         <button type="submit" class="cta-add">Download as PDF</button>
     </form>
     <form method="post" action="/download_letter/" id="docxForm" style="display:inline;" onsubmit="prepareEdit()">
         {% csrf_token %}
         <input type="hidden" name="roll" value="{{student.std.roll_number}}">
+        <input type="hidden" name="template_id" value="{{ template_id }}">
+        <textarea name="edited_letter" class="edited_letter" style="display:none;"></textarea>
         <input type="hidden" name="format" value="docx">
         <button type="submit" class="cta-add">Download as DOCX</button>
     </form>
@@ -54,13 +56,13 @@
 }
 </style>
 <script>
-    // function to copy current editable letter into hidden textarea before submitting download form
+    // Copy the edited letter into every form's hidden textarea before submitting.
     function prepareEdit() {
         var editable = document.getElementById('letter_editable');
-        var hidden = document.getElementById('edited_letter');
-        if (editable && hidden) {
-            // use innerText to strip HTML tags; you may switch to innerHTML if desired
-            hidden.value = editable.innerText;
+        if (!editable) { return; }
+        var fields = document.getElementsByClassName('edited_letter');
+        for (var i = 0; i < fields.length; i++) {
+            fields[i].value = editable.innerText;
         }
     }
 </script>

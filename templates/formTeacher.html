@@ -292,13 +292,12 @@
 
         <div class="input-box">
           <span class="details">Choose Template</span>
-           <select name="temp" id="template" required>
-            <option value="default" {% if not default_template %}selected{% endif %}>Default</option>
+           <select name="template_id" id="template" required>
              {% for template in templates %}
-             <option value="{{template.template_name}}" {% if default_template and template.pk == default_template.pk %}selected{% endif %}>{{template.template_name}}</option>
+             <option value="{{ template.pk }}" {% if default_template and template.pk == default_template.pk %}selected{% endif %}>
+               {{ template.template_name }}{% if template.is_system %} (system){% endif %}
+             </option>
              {% endfor %}
-
-             <!-- <option value = "default" >Default</option> Default Template -->
            </select>
          </div>
        
@@ -320,17 +319,9 @@
   </div>
 </div>
 
-<script>
-  document.getElementById('template').addEventListener('change', function() {
-    var form = document.getElementById('recommendationForm');
-    var selectedTemplate = this.value;
-    if (selectedTemplate === 'default') {
-      form.action = '/edit';
-    } else {
-      form.action = '/renderCustom';
-    }
-  });
-</script>
+<!-- The picker used to reroute the form to /edit for the magic "default"
+     option. Options are now template pks, so every choice previews through
+     /renderCustom - the action already declared on the form. -->
 
 
 {% endblock body %}

@@ -1,13 +1,17 @@
-from datetime import datetime
+import os
+import tempfile
+from datetime import date, datetime
 
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
-    StudentLoginInfo, TeacherInfo,
+    StudentLoginInfo, TeacherInfo, CustomTemplates, Qualities,
+    Paper, Project, Files,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
@@ -778,6 +782,7 @@ class TeacherDashboardViewTests(TestCase):
             stored.generated_letter.delete(save=False)
 
 
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class DownloadGeneratedTests(TestCase):
     def setUp(self):
         dept = Department.objects.create(dept_name="BCT")
@@ -805,9 +810,6 @@ class DownloadGeneratedTests(TestCase):
         )
         self.client.cookies["unique"] = "T500"
 
-    def tearDown(self):
-        self.stored.generated_letter.delete(save=False)
-
     def test_returns_stored_file(self):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 200)
@@ -824,10 +826,17 @@ class DownloadGeneratedTests(TestCase):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 404)
 
-    def test_anonymous_request_is_not_served(self):
+    def test_anonymous_request_is_sent_to_the_login_page(self):
         del self.client.cookies["unique"]
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
+
+    def test_unknown_professor_cookie_is_sent_to_the_login_page(self):
+        self.client.cookies["unique"] = "T-does-not-exist"
+        response = self.client.get(f"/download_generated/?id={self.stored.pk}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "/loginTeacher")
 
     def test_missing_id_parameter_is_not_served(self):
         response = self.client.get("/download_generated/")
@@ -838,3 +847,1607 @@ class DownloadGeneratedTests(TestCase):
             with self.subTest(bad=bad):
                 response = self.client.get(f"/download_generated/?id={bad}")
                 self.assertEqual(response.status_code, 404)
+
+
+class SystemTemplateModelTests(TestCase):
+    """CustomTemplates must support shared system templates (FR-1)."""
+
+    def test_a_system_template_needs_no_professor(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Formal / Academic",
+            template="Dear Committee,",
+            professor=None,
+            is_system=True,
+        )
+        self.assertIsNone(tpl.professor)
+        self.assertTrue(tpl.is_system)
+
+    def test_professor_templates_are_not_system_by_default(self):
+        dept = Department.objects.create(dept_name="BCT")
+        teacher = TeacherInfo.objects.create(
+            name="Prof A", unique_id="T-A", department=dept
+        )
+        tpl = CustomTemplates.objects.create(
+            template_name="Mine", template="Hello", professor=teacher
+        )
+        self.assertFalse(tpl.is_system)
+
+    def test_str_does_not_crash_without_a_professor(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Formal", template="x", professor=None, is_system=True
+        )
+        self.assertIn("Formal", str(tpl))
+
+
+class SeededSystemTemplateTests(TestCase):
+    """The data migration must ship a usable starter library (FR-1)."""
+
+    def test_three_system_templates_are_seeded(self):
+        seeded = CustomTemplates.objects.filter(is_system=True)
+        self.assertEqual(seeded.count(), 3)
+
+    def test_seeded_templates_have_names_and_bodies(self):
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                self.assertTrue(tpl.template_name)
+                self.assertGreater(len(tpl.template), 100)
+                self.assertIsNone(tpl.professor)
+                self.assertFalse(tpl.is_default)
+
+    def test_seeded_templates_are_ascii_only(self):
+        # The PDF export encodes latin-1; a stray em dash crashes the download.
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                tpl.template.encode("ascii")
+
+    def test_seeded_templates_are_valid_jinja(self):
+        from jinja2 import Template
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                Template(tpl.template)  # raises TemplateSyntaxError if malformed
+
+    def test_seeded_templates_render_without_leaking_none(self):
+        """A sparse application must not put the literal word None in the prose."""
+        from jinja2 import Template
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof Q", unique_id="T-Q", email="q@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Sparse Student", roll_number="080BCT500", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Sparse Student", std=student, professor=teacher,
+        )
+        # Every satellite object is absent, as it is for a barely-filled request.
+        context = {
+            "app": application, "teacher": teacher, "academics": None,
+            "paper": None, "project": None, "university": None, "quality": None,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(context)
+                self.assertNotIn("None", letter)
+                self.assertIn("Sparse Student", letter)
+                # No paragraph may be bare punctuation left by an empty branch.
+                for line in letter.splitlines():
+                    self.assertNotIn(line.strip(), (".", ",", "-"))
+
+    def test_seeded_paragraphs_are_single_source_lines(self):
+        """The PDF exporter does not reflow across newlines, so a sentence
+        split over two source lines becomes two ragged lines in the export."""
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            for line in tpl.template.splitlines():
+                stripped = line.strip()
+                # A line that ends mid-sentence has broken a paragraph in two.
+                if stripped and not stripped.startswith("{%") and len(stripped) > 60:
+                    with self.subTest(name=tpl.template_name, line=stripped[:40]):
+                        self.assertTrue(
+                            stripped.endswith((".", "}", "%}", '"', "!")),
+                            f"paragraph broken mid-sentence: {stripped!r}",
+                        )
+
+    def _render_seeded(self, context):
+        from jinja2 import Template
+        return [
+            (tpl.template_name, Template(tpl.template).render(context))
+            for tpl in CustomTemplates.objects.filter(is_system=True)
+        ]
+
+    def test_blank_related_rows_do_not_leave_holes_in_the_prose(self):
+        """Guards must fire for rows that EXIST but whose fields are blank.
+
+        The sparse case above passes None for every satellite object, so the
+        guards on dept_name/program_name/gpa are never actually exercised. Here
+        the rows exist and the fields are empty, which is the realistic shape:
+        Department.dept_name and Program.program_name are NOT NULL but
+        blank=True, so the empty value is "" and dropping a guard leaves a
+        doubled space ("studies in  at the Institute"), not the word "None".
+        """
+        dept = Department.objects.create(dept_name="")
+        program = Program.objects.create(program_name="", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof B", unique_id="T-B", email="b@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Blank Student", roll_number="080BCT501", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Blank Student", std=student, professor=teacher,
+        )
+        # The row exists but carries no grade, so the GPA sentence must not run.
+        academics = Academics.objects.create(
+            application=application, gpa="", tentative_ranking="",
+        )
+        context = {
+            "app": application, "teacher": teacher, "academics": academics,
+            "paper": None, "project": None, "university": None, "quality": None,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        for name, letter in self._render_seeded(context):
+            with self.subTest(name=name):
+                self.assertIn("Blank Student", letter)
+                self.assertNotIn("None", letter)
+                # An unguarded blank field collapses to "" and doubles a space.
+                self.assertNotIn("  ", letter)
+                # academics is truthy but has no gpa: the whole sentence goes.
+                self.assertNotIn("GPA", letter)
+
+    def test_seeded_templates_are_grammatical_for_plural_pronouns(self):
+        """Students with unset gender get They/them/Their, which must not
+        collide with third-person-singular verbs ("They has maintained")."""
+        from jinja2 import Template
+        dept = Department.objects.create(dept_name="BEI")
+        program = Program.objects.create(program_name="BE-BEI", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof Z", unique_id="T-Z", email="z@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Plural Student", roll_number="080BEI777", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Plural Student", std=student, professor=teacher,
+            subjects="Control Systems", is_paper=True,
+        )
+        academics = Academics.objects.create(application=application, gpa="3.75")
+        quality = Qualities.objects.create(
+            application=application, leadership=True, hardworking=True,
+            teamwork=True, friendly=True, quality="unfailingly curious",
+        )
+        context = {
+            "app": application, "teacher": teacher, "academics": academics,
+            "paper": None, "project": None, "university": None, "quality": quality,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        singular_verbs = (
+            "They has", "they has", "They is", "they is", "They shows",
+            "they shows", "They works", "they works", "They holds", "they holds",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            letter = Template(tpl.template).render(context)
+            for bad in singular_verbs:
+                with self.subTest(name=tpl.template_name, phrase=bad):
+                    self.assertNotIn(bad, letter)
+
+
+class LetterContextTests(TestCase):
+    """build_letter_context assembles everything the Jinja templates read."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof B", unique_id="T-B", email="b@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Ramesh Shrestha", roll_number="080BCT042", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Ramesh Shrestha", std=self.student, professor=self.teacher,
+            subjects="Data Structures,Algorithms",
+        )
+
+    def test_pronouns_follow_the_student_gender(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "He")
+        self.assertEqual(ctx["pronoun_obj"], "him")
+        self.assertEqual(ctx["pronoun_pos"], "His")
+
+    def test_female_gender_maps_correctly(self):
+        from home.letters import build_letter_context
+        self.student.gender = "Female"
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "She")
+        self.assertEqual(ctx["pronoun_obj"], "her")
+        self.assertEqual(ctx["pronoun_pos"], "Her")
+
+    def test_unknown_gender_falls_back_to_they(self):
+        from home.letters import build_letter_context
+        self.student.gender = ""
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["pronoun"], "They")
+        self.assertEqual(ctx["pronoun_obj"], "them")
+        self.assertEqual(ctx["pronoun_pos"], "Their")
+
+    def test_null_gender_falls_back_to_they(self):
+        from home.letters import build_letter_context
+        self.student.gender = None
+        self.student.save()
+        self.assertEqual(build_letter_context(self.application)["pronoun"], "They")
+
+    def test_gender_matching_is_case_insensitive(self):
+        from home.letters import build_letter_context
+        self.student.gender = "MALE"
+        self.student.save()
+        self.assertEqual(build_letter_context(self.application)["pronoun"], "He")
+
+    def test_no_context_value_is_none_for_the_pronoun_words(self):
+        # Jinja's ``|lower`` filter raises on an explicit None, and every
+        # seeded template pipes these through it.
+        from home.letters import build_letter_context
+        self.student.gender = None
+        self.student.save()
+        ctx = build_letter_context(self.application)
+        for key in ("pronoun", "pronoun_obj", "pronoun_pos", "rel_desc", "strength_phrase"):
+            with self.subTest(key=key):
+                self.assertIsInstance(ctx[key], str)
+
+    def test_subjects_are_split_into_list_and_last(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["subjects"], ["Data Structures"])
+        self.assertEqual(ctx["subject"], "Algorithms")
+
+    def test_single_subject_sets_value_true(self):
+        from home.letters import build_letter_context
+        self.application.subjects = "Algorithms"
+        self.application.save()
+        ctx = build_letter_context(self.application)
+        self.assertTrue(ctx["value"])
+
+    def test_empty_subjects_do_not_crash(self):
+        from home.letters import build_letter_context
+        self.application.subjects = ""
+        self.application.save()
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["subjects"], [])
+        self.assertFalse(ctx["value"])
+
+    def test_firstname_is_the_first_word(self):
+        from home.letters import build_letter_context
+        self.assertEqual(build_letter_context(self.application)["firstname"], "Ramesh")
+
+    def test_missing_satellite_rows_do_not_raise(self):
+        # No Paper/Project/University/Qualities/Academics/Files rows exist.
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        for key in ("paper", "project", "university", "quality", "academics", "files"):
+            with self.subTest(key=key):
+                self.assertIsNone(ctx[key])
+        self.assertEqual(ctx["deadline"], "")
+
+    def test_satellite_rows_are_returned_when_present(self):
+        from home.letters import build_letter_context
+        academics = Academics.objects.create(application=self.application, gpa="3.9")
+        university = University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+        )
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["academics"], academics)
+        self.assertEqual(ctx["university"], university)
+
+    def test_deadline_is_formatted_when_present(self):
+        from home.letters import build_letter_context
+        University.objects.create(
+            application=self.application, uni_name="MIT", country="USA",
+            uni_deadline=date(2026, 12, 15),
+        )
+        self.assertEqual(build_letter_context(self.application)["deadline"], "December 15, 2026")
+
+    def test_teacher_and_app_aliases_are_present(self):
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        self.assertEqual(ctx["teacher"], self.teacher)
+        self.assertEqual(ctx["app"], self.application)
+        self.assertEqual(ctx["student"], self.application)
+        self.assertTrue(ctx["today"])
+
+    def test_every_seeded_system_template_renders_against_this_context(self):
+        # The real integration check: the three shipped templates must render
+        # against exactly what this function produces.
+        from jinja2 import Template
+        from home.letters import build_letter_context
+        ctx = build_letter_context(self.application)
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertIn("Ramesh Shrestha", letter)
+                self.assertNotIn("None", letter)
+
+    def test_rel_desc_comes_from_the_application(self):
+        from home.letters import build_letter_context
+        self.application.relationship_type = "project supervisor"
+        self.application.save()
+        self.assertEqual(build_letter_context(self.application)["rel_desc"], "project supervisor")
+
+    def test_rel_desc_falls_back_when_unset(self):
+        from home.letters import build_letter_context
+        for value in (None, "", "   "):
+            with self.subTest(value=value):
+                self.application.relationship_type = value
+                self.application.save()
+                self.assertEqual(build_letter_context(self.application)["rel_desc"], "teacher")
+
+    def test_strength_phrase_follows_the_recommendation_strength(self):
+        from home.letters import build_letter_context
+        quality = Qualities.objects.create(application=self.application)
+        expected = {
+            "top5": "as one of the very best students I have taught",
+            "top10": "as one of the strongest students I have taught",
+            "outstanding": "in the strongest possible terms",
+            "strong": "with great enthusiasm",
+        }
+        for value, phrase in expected.items():
+            with self.subTest(value=value):
+                quality.recommendation_strength = value
+                quality.save()
+                self.assertEqual(build_letter_context(self.application)["strength_phrase"], phrase)
+
+    def test_strength_phrase_falls_back_without_a_qualities_row(self):
+        from home.letters import build_letter_context
+        self.assertEqual(
+            build_letter_context(self.application)["strength_phrase"],
+            "with great enthusiasm",
+        )
+
+    def test_strength_phrase_falls_back_on_an_unrecognised_value(self):
+        from home.letters import build_letter_context
+        Qualities.objects.create(application=self.application, recommendation_strength="")
+        self.assertEqual(
+            build_letter_context(self.application)["strength_phrase"],
+            "with great enthusiasm",
+        )
+
+    def test_recommendation_reads_correctly_for_every_strength(self):
+        """Each phrase must slot grammatically into every seeded template."""
+        from jinja2 import Template
+        from home.letters import build_letter_context
+        quality = Qualities.objects.create(application=self.application)
+        for value in ("top5", "top10", "outstanding", "strong"):
+            quality.recommendation_strength = value
+            quality.save()
+            ctx = build_letter_context(self.application)
+            for tpl in CustomTemplates.objects.filter(is_system=True):
+                with self.subTest(strength=value, name=tpl.template_name):
+                    letter = Template(tpl.template).render(ctx)
+                    self.assertNotIn("and without reservation", letter)
+                    self.assertNotIn("  ", letter)
+                    # A trailing prepositional phrase must not attach itself
+                    # to the end of a ranked strength phrase.
+                    self.assertNotIn("I have taught for", letter)
+
+    def _subjects(self, raw):
+        from home.letters import build_letter_context
+        self.application.subjects = raw
+        self.application.save()
+        return build_letter_context(self.application)
+
+    def test_subject_keys_agree_on_empty_segments(self):
+        # subjects/subject/value were derived separately in the legacy views
+        # and disagreed; one normalisation now backs all three.
+        cases = {
+            "A,B,C": (["A", "B"], "C", False),
+            "A": ([], "A", True),
+            "A,": ([], "A", True),       # trailing comma must not blank the subject
+            ",A": ([], "A", True),
+            "A, B": (["A"], "B", False),  # inner whitespace is stripped
+            "": ([], "", False),
+            None: ([], "", False),
+        }
+        for raw, (subjects, subject, value) in cases.items():
+            with self.subTest(raw=raw):
+                ctx = self._subjects(raw)
+                self.assertEqual(ctx["subjects"], subjects)
+                self.assertEqual(ctx["subject"], subject)
+                self.assertEqual(ctx["value"], value)
+
+    def test_a_trailing_comma_does_not_drop_the_only_subject(self):
+        # Legacy gave value=True with subject="", rendering "I taught him .".
+        ctx = self._subjects("Algorithms,")
+        self.assertTrue(ctx["value"])
+        self.assertEqual(ctx["subject"], "Algorithms")
+
+    def test_subjects_sentence_reads_as_prose(self):
+        for raw, expected in (
+            ("", ""),
+            ("Algorithms", "Algorithms"),
+            ("Algorithms,Compilers", "Algorithms and Compilers"),
+            ("Algorithms,Compilers,Networks", "Algorithms, Compilers and Networks"),
+            ("Algorithms, Compilers , Networks", "Algorithms, Compilers and Networks"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(self._subjects(raw)["subjects_sentence"], expected)
+
+    def test_firstname_handles_awkward_whitespace(self):
+        from home.letters import build_letter_context
+        for raw, expected in (
+            ("  Ram Thapa", "Ram"),      # leading space returned "" before
+            ("Ram  Thapa", "Ram"),
+            ("Sita", "Sita"),
+            ("", ""),
+            (None, ""),
+        ):
+            with self.subTest(raw=raw):
+                self.application.name = raw
+                self.application.save()
+                self.assertEqual(build_letter_context(self.application)["firstname"], expected)
+
+    def test_seeded_templates_list_subjects_as_prose(self):
+        from jinja2 import Template
+        ctx = self._subjects("Algorithms,Compilers,Networks")
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertNotIn("Algorithms,Compilers", letter)
+                if "Algorithms" in letter:
+                    self.assertIn("Algorithms, Compilers and Networks", letter)
+
+    def test_seeded_templates_omit_the_subject_clause_when_unset(self):
+        from jinja2 import Template
+        ctx = self._subjects("")
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(ctx)
+                self.assertNotIn("having taught", letter)
+                self.assertNotIn("I taught", letter)
+                self.assertNotIn(" in .", letter)
+
+
+class TemplateSelectionTests(TestCase):
+    """select_template resolves a professor's pick, default, then system (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof C", unique_id="T-C", email="c@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof D", unique_id="T-D", email="d@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Mine", template="mine", professor=self.teacher
+        )
+        self.my_default = CustomTemplates.objects.create(
+            template_name="My Default", template="default",
+            professor=self.teacher, is_default=True,
+        )
+        self.theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="theirs", professor=self.other
+        )
+
+    def test_an_explicit_own_template_wins(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, self.mine.pk), self.mine)
+
+    def test_a_system_template_may_be_selected(self):
+        from home.letters import select_template
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.assertEqual(select_template(self.teacher, system.pk), system)
+
+    def test_another_professors_template_is_refused(self):
+        from home.letters import select_template
+        # Falls back to this professor's default rather than leaking Prof D's.
+        self.assertEqual(select_template(self.teacher, self.theirs.pk), self.my_default)
+
+    def test_no_choice_uses_the_professors_default(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, None), self.my_default)
+
+    def test_blank_and_malformed_ids_use_the_default(self):
+        from home.letters import select_template
+        for bad in ("", "   ", "abc", None, "0", "-1", "9999999"):
+            with self.subTest(value=bad):
+                self.assertEqual(select_template(self.teacher, bad), self.my_default)
+
+    def test_string_ids_from_post_data_work(self):
+        from home.letters import select_template
+        self.assertEqual(select_template(self.teacher, str(self.mine.pk)), self.mine)
+
+    def test_without_a_default_it_falls_back_to_a_system_template(self):
+        from home.letters import select_template
+        CustomTemplates.objects.filter(professor=self.teacher).delete()
+        chosen = select_template(self.teacher, None)
+        self.assertTrue(chosen.is_system)
+
+    def test_with_nothing_at_all_it_returns_none(self):
+        from home.letters import select_template
+        CustomTemplates.objects.all().delete()
+        self.assertIsNone(select_template(self.teacher, None))
+
+    def test_another_professors_default_is_not_used_as_mine(self):
+        from home.letters import select_template
+        CustomTemplates.objects.create(
+            template_name="Their Default", template="secret",
+            professor=self.other, is_default=True,
+        )
+        self.assertEqual(select_template(self.teacher, None), self.my_default)
+
+    def test_without_my_own_default_i_get_a_system_template_not_theirs(self):
+        from home.letters import select_template
+        CustomTemplates.objects.create(
+            template_name="Their Default", template="secret",
+            professor=self.other, is_default=True,
+        )
+        CustomTemplates.objects.filter(professor=self.teacher).delete()
+        chosen = select_template(self.teacher, None)
+        self.assertTrue(chosen.is_system)
+        self.assertIsNone(chosen.professor)
+
+    def test_an_owned_row_flagged_system_cannot_exist(self):
+        # The leak this closes: such a row would satisfy the ``is_system`` arm
+        # and so be visible to every professor. The DB constraint makes it
+        # unrepresentable, so there is nothing for the query to leak.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CustomTemplates.objects.create(
+                    template_name="Hybrid", template="secret",
+                    professor=self.other, is_system=True,
+                )
+
+    def test_the_system_arm_of_the_predicate_requires_an_unowned_row(self):
+        # Defence in depth behind the constraint above: even if the constraint
+        # were dropped, the query must not match an owned row flagged system.
+        from home.letters import visible_to
+        system_arm = [
+            child for child in visible_to(self.teacher).children
+            if hasattr(child, "children")
+        ]
+        self.assertEqual(len(system_arm), 1)
+        self.assertIn(("professor__isnull", True), system_arm[0].children)
+
+
+class AvailableTemplateTests(TestCase):
+    """available_templates lists what a professor may generate from (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof C2", unique_id="T-C2", email="c2@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof D2", unique_id="T-D2", email="d2@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Mine", template="mine", professor=self.teacher
+        )
+        self.theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="theirs", professor=self.other
+        )
+
+    def test_own_templates_are_included(self):
+        from home.letters import available_templates
+        self.assertIn(self.mine, available_templates(self.teacher))
+
+    def test_system_templates_are_included(self):
+        from home.letters import available_templates
+        names = {t.template_name for t in available_templates(self.teacher)}
+        self.assertIn("Formal / Academic", names)
+
+    def test_another_professors_templates_are_excluded(self):
+        from home.letters import available_templates
+        self.assertNotIn(self.theirs, available_templates(self.teacher))
+
+    def test_no_template_appears_twice(self):
+        from home.letters import available_templates
+        results = list(available_templates(self.teacher))
+        self.assertEqual(len(results), len({t.pk for t in results}))
+
+    def test_the_default_sorts_first(self):
+        from home.letters import available_templates
+        self.mine.is_default = True
+        self.mine.save()
+        self.assertEqual(available_templates(self.teacher).first(), self.mine)
+
+    def test_it_returns_a_queryset_that_can_be_filtered(self):
+        # ``make_letter`` chains .filter(is_default=True) onto this.
+        from home.letters import available_templates
+        self.mine.is_default = True
+        self.mine.save()
+        self.assertEqual(
+            available_templates(self.teacher).filter(is_default=True).first(), self.mine
+        )
+
+    def test_an_owned_row_flagged_system_is_excluded(self):
+        from home.letters import available_templates
+        # Same leak as in TemplateSelectionTests, via the listing rather than
+        # the picker. The constraint blocks the row outright.
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                CustomTemplates.objects.create(
+                    template_name="Hybrid", template="secret",
+                    professor=self.other, is_system=True,
+                )
+        self.assertNotIn(self.theirs, available_templates(self.teacher))
+
+
+class RenderLetterTests(TestCase):
+    """render_letter fills the chosen template with application data (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof E", unique_id="T-E", email="e@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Sita Rai", roll_number="080BCT001", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Sita Rai", std=self.student, professor=self.teacher,
+            subjects="Physics",
+        )
+        # A default whose body differs from every template under test, so that
+        # "the chosen body is used" cannot pass by silently falling back here.
+        self.default = CustomTemplates.objects.create(
+            template_name="Default", template="DEFAULT-BODY-NOT-CHOSEN",
+            professor=self.teacher, is_default=True,
+        )
+
+    def test_the_chosen_template_body_is_used(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Terse", template="Hello {{ app.name }} from {{ teacher.name }}.",
+            professor=self.teacher,
+        )
+        self.assertEqual(
+            render_letter(self.application, tpl), "Hello Sita Rai from Prof E."
+        )
+
+    def test_pronouns_reach_the_template(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="P", template="{{ pronoun }} and {{ pronoun_obj }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "She and her")
+
+    def test_no_template_renders_empty(self):
+        from home.letters import render_letter
+        self.assertEqual(render_letter(self.application, None), "")
+
+    def test_a_template_with_an_empty_body_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Blank", template="", professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_every_seeded_system_template_renders(self):
+        from home.letters import render_letter
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(self.application, tpl)
+                self.assertIn("Sita Rai", letter)
+                self.assertIn("Prof E", letter)
+                self.assertNotIn("None", letter)
+
+    def test_a_template_with_broken_syntax_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Broken", template="{% for x in y %}no endfor",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_a_template_referencing_a_missing_field_renders_empty(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Undefined", template="{{ app.nonexistent.attr }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_sandbox_escape_attempts_are_refused(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Escape", template="{{ ''.__class__.__mro__ }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_the_subclass_walk_springboard_is_refused(self):
+        from home.letters import render_letter
+        tpl = CustomTemplates.objects.create(
+            template_name="Springboard",
+            template="{{ app.std.__class__.__mro__[1].__subclasses__()|length }}",
+            professor=self.teacher,
+        )
+        self.assertEqual(render_letter(self.application, tpl), "")
+
+    def test_a_sandbox_violation_raises_a_template_error(self):
+        # ``render_letter`` relies on SecurityError subclassing TemplateError.
+        from jinja2 import TemplateError
+        from jinja2.sandbox import SecurityError
+        self.assertTrue(issubclass(SecurityError, TemplateError))
+
+
+class LetterExportTests(TestCase):
+    """PDF/DOCX bytes are produced from letter text (FR-1)."""
+
+    def test_pdf_bytes_look_like_a_pdf(self):
+        from home.letters import build_pdf_bytes
+        data = build_pdf_bytes("Dear Committee,\n\nRegards,\nProf")
+        self.assertTrue(data.startswith(b"%PDF"))
+
+    def test_docx_bytes_look_like_a_zip(self):
+        # .docx is a zip container; PK is the zip magic number.
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("Dear Committee,\n\nRegards,\nProf")
+        self.assertTrue(data.startswith(b"PK"))
+
+    def test_docx_keeps_one_paragraph_per_block(self):
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("First block.\n\nSecond block.")
+        doc = Document(io.BytesIO(data))
+        texts = [p.text for p in doc.paragraphs]
+        self.assertIn("First block.", texts)
+        self.assertIn("Second block.", texts)
+
+    def test_docx_preserves_the_letter_text(self):
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("Dear Committee,\n\nI recommend her warmly.")
+        doc = Document(io.BytesIO(data))
+        joined = "\n".join(p.text for p in doc.paragraphs)
+        self.assertIn("I recommend her warmly.", joined)
+
+    def test_empty_text_still_produces_a_file(self):
+        from home.letters import build_docx_bytes, build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("").startswith(b"%PDF"))
+        self.assertTrue(build_docx_bytes("").startswith(b"PK"))
+
+    def test_non_latin1_characters_are_replaced_not_crashed(self):
+        # fpdf encodes latin-1; an em dash used to raise UnicodeEncodeError.
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("A — B").startswith(b"%PDF"))
+
+    def test_curly_quotes_do_not_crash_the_pdf(self):
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("“Quoted” and ‘single’").startswith(b"%PDF"))
+
+    def test_docx_handles_non_latin1_characters_natively(self):
+        # Only the PDF path is latin-1 limited; docx is XML/UTF-8.
+        import io
+        from docx import Document
+        from home.letters import build_docx_bytes
+        data = build_docx_bytes("A — B")
+        doc = Document(io.BytesIO(data))
+        self.assertIn("—", "\n".join(p.text for p in doc.paragraphs))
+
+    def test_a_long_letter_paginates_without_error(self):
+        from home.letters import build_pdf_bytes
+        long_text = "\n\n".join(f"Paragraph number {i}. " * 20 for i in range(60))
+        self.assertTrue(build_pdf_bytes(long_text).startswith(b"%PDF"))
+
+    def test_a_very_long_unbroken_word_does_not_hang(self):
+        # multi_cell can loop forever on a token wider than the cell.
+        from home.letters import build_pdf_bytes
+        self.assertTrue(build_pdf_bytes("A" * 500).startswith(b"%PDF"))
+
+    def test_the_seeded_templates_export_end_to_end(self):
+        from home.letters import build_docx_bytes, build_pdf_bytes, render_letter
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof X", unique_id="T-X", email="x@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Export Student", roll_number="080BCT600", department=dept,
+            program=program, password="x", dob="2000-01-01", gender="Female",
+        )
+        application = Application.objects.create(
+            name="Export Student", std=student, professor=teacher, subjects="Physics",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = render_letter(application, tpl)
+                self.assertTrue(build_pdf_bytes(letter).startswith(b"%PDF"))
+                self.assertTrue(build_docx_bytes(letter).startswith(b"PK"))
+
+
+class RenderCustomViewTests(TestCase):
+    """The preview renders the professor's chosen template (FR-1)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof F", unique_id="T-F", email="f@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Hari Thapa", roll_number="080BCT007", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Male",
+        )
+        self.application = Application.objects.create(
+            name="Hari Thapa", std=self.student, professor=self.teacher,
+            subjects="Networks",
+        )
+        Qualities.objects.create(application=self.application)
+        self.chosen = CustomTemplates.objects.create(
+            template_name="Chosen", template="CHOSEN for {{ app.name }}",
+            professor=self.teacher,
+        )
+        self.fallback = CustomTemplates.objects.create(
+            template_name="Fallback", template="FALLBACK", professor=self.teacher,
+            is_default=True,
+        )
+        self.client.cookies["unique"] = "T-F"
+
+    def test_the_selected_template_is_rendered(self):
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CHOSEN for Hari Thapa")
+
+    def test_without_a_selection_the_default_is_rendered(self):
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertContains(response, "FALLBACK")
+
+    def test_a_system_template_can_be_selected(self):
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": system.pk,
+        })
+        self.assertContains(response, "Hari Thapa")
+
+    def test_the_chosen_template_id_is_carried_into_the_download_form(self):
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+        })
+        self.assertContains(response, f'name="template_id" value="{self.chosen.pk}"')
+
+    def test_the_professor_anecdote_is_still_saved(self):
+        self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+            "prof_anecdote": "He rebuilt the lab router overnight.",
+        })
+        self.application.refresh_from_db()
+        self.assertEqual(
+            self.application.prof_anecdote, "He rebuilt the lab router overnight."
+        )
+
+    def test_the_quality_checkboxes_are_still_saved(self):
+        self.client.post("/renderCustom", {
+            "roll": "080BCT007", "template_id": self.chosen.pk,
+            "quality1": "on", "quality2": "on", "qual": "diligent",
+        })
+        quality = Qualities.objects.get(application=self.application)
+        self.assertTrue(quality.leadership)
+        self.assertTrue(quality.hardworking)
+        self.assertFalse(quality.social)
+        self.assertEqual(quality.quality, "diligent")
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_another_professors_student_is_not_previewable(self):
+        other = TeacherInfo.objects.create(
+            name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-G"
+        response = self.client.post("/renderCustom", {"roll": "080BCT007"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_an_unknown_roll_is_not_found(self):
+        response = self.client.post("/renderCustom", {"roll": "NOSUCHROLL"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects_to_the_dashboard(self):
+        response = self.client.get("/renderCustom")
+        self.assertEqual(response.status_code, 302)
+
+    def test_an_application_with_no_satellite_rows_still_previews(self):
+        # The old view used .get() on six satellite models and raised
+        # DoesNotExist for a barely-filled request.
+        bare_student = StudentLoginInfo.objects.create(
+            username="Bare Student", roll_number="080BCT888", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01",
+        )
+        Application.objects.create(
+            name="Bare Student", std=bare_student, professor=self.teacher,
+        )
+        response = self.client.post("/renderCustom", {
+            "roll": "080BCT888", "template_id": self.chosen.pk,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CHOSEN for Bare Student")
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class MakeLetterTemplateListTests(TestCase):
+    """The letter form offers system templates as well as the professor's own."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Gita Kc", roll_number="080BCT321", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Gita Kc", std=self.student, professor=self.teacher, subjects="Maths",
+        )
+        Paper.objects.create(application=self.application)
+        Project.objects.create(application=self.application)
+        University.objects.create(application=self.application, uni_name="MIT", country="USA")
+        Qualities.objects.create(application=self.application)
+        Academics.objects.create(application=self.application)
+        # formTeacher.html dereferences .url on every uploaded file unguarded,
+        # so the fixture must actually attach them or the template 500s.
+        files = Files.objects.create(application=self.application)
+        for field in ("Photo", "transcript", "CV"):
+            getattr(files, field).save(
+                f"{field}.pdf", ContentFile(b"x"), save=False
+            )
+        files.save()
+        self.teacher.images.save("prof.png", ContentFile(b"x"), save=True)
+        self.user = User.objects.create_user(username="proph", password="pw")
+        self.user.first_name = "Prof H/T-H"
+        self.user.save()
+
+    def test_the_picker_offers_system_templates(self):
+        self.client.force_login(self.user)
+        self.client.cookies["unique"] = "T-H"
+        response = self.client.post("/makeLetter", {"roll": "080BCT321"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Formal / Academic")
+
+    def test_the_picker_posts_a_template_id(self):
+        self.client.force_login(self.user)
+        self.client.cookies["unique"] = "T-H"
+        response = self.client.post("/makeLetter", {"roll": "080BCT321"})
+        self.assertContains(response, 'name="template_id"')
+        self.assertNotContains(response, 'name="temp"')
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class DownloadLetterTests(TestCase):
+    """Exporting a letter stores it and stamps the tracking fields (FR-1/FR-5)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Gita Kc", roll_number="080BCT099", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        self.application = Application.objects.create(
+            name="Gita Kc", std=self.student, professor=self.teacher, subjects="Signals",
+        )
+        self.tpl = CustomTemplates.objects.create(
+            template_name="Export", template="EXPORTED for {{ app.name }}",
+            professor=self.teacher,
+        )
+        self.client.cookies["unique"] = "T-G"
+
+    def _post(self, **extra):
+        payload = {"roll": "080BCT099", "format": "pdf", "template_id": self.tpl.pk}
+        payload.update(extra)
+        return self.client.post("/download_letter/", payload)
+
+    def test_pdf_download_returns_a_pdf(self):
+        response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_docx_download_returns_a_docx(self):
+        response = self._post(format="docx")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("wordprocessingml", response["Content-Type"])
+
+    def test_generation_stamps_the_tracking_fields(self):
+        self._post()
+        self.application.refresh_from_db()
+        self.assertTrue(self.application.is_generated)
+        self.assertIsNotNone(self.application.generated_at)
+        self.assertEqual(self.application.generated_template, self.tpl)
+        self.assertTrue(self.application.generated_letter)
+
+    def test_the_stored_file_is_the_downloaded_file(self):
+        response = self._post()
+        self.application.refresh_from_db()
+        with self.application.generated_letter.open("rb") as handle:
+            self.assertEqual(handle.read(), response.content)
+
+    def test_the_chosen_template_is_used_not_the_default(self):
+        CustomTemplates.objects.create(
+            template_name="My Default", template="DEFAULT-BODY",
+            professor=self.teacher, is_default=True,
+        )
+        response = self._post(format="docx")
+        import io
+        from docx import Document
+        text = "\n".join(p.text for p in Document(io.BytesIO(response.content)).paragraphs)
+        self.assertIn("EXPORTED for Gita Kc", text)
+        self.assertNotIn("DEFAULT-BODY", text)
+
+    def test_edited_text_is_used_instead_of_the_template(self):
+        response = self._post(format="docx", edited_letter="HAND WRITTEN VERSION")
+        import io
+        from docx import Document
+        texts = [p.text for p in Document(io.BytesIO(response.content)).paragraphs]
+        self.assertIn("HAND WRITTEN VERSION", texts)
+        self.assertNotIn("EXPORTED for Gita Kc", texts)
+
+    def test_the_edited_text_is_what_gets_stored(self):
+        self._post(format="docx", edited_letter="HAND WRITTEN VERSION")
+        self.application.refresh_from_db()
+        import io
+        from docx import Document
+        with self.application.generated_letter.open("rb") as handle:
+            texts = [p.text for p in Document(io.BytesIO(handle.read())).paragraphs]
+        self.assertIn("HAND WRITTEN VERSION", texts)
+
+    def test_regenerating_replaces_the_stored_file_and_timestamp(self):
+        self._post()
+        self.application.refresh_from_db()
+        first_at = self.application.generated_at
+        self._post(format="docx")
+        self.application.refresh_from_db()
+        self.assertGreaterEqual(self.application.generated_at, first_at)
+        self.assertTrue(self.application.generated_letter.name.endswith(".docx"))
+
+    def test_the_stored_letter_is_servable_by_download_generated(self):
+        # Phase 2 built this endpoint; Task 7 is what finally gives it a file.
+        self._post()
+        # The view stamped the row; this instance predates that write.
+        self.application.refresh_from_db()
+        response = self.client.get(f"/download_generated/?id={self.application.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            self.application.generated_letter.open("rb").read(),
+        )
+
+    def test_another_professor_cannot_export_this_letter(self):
+        TeacherInfo.objects.create(
+            name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-H"
+        self.assertEqual(self._post().status_code, 404)
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self._post()
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_an_unknown_format_is_rejected(self):
+        self.assertEqual(self._post(format="txt").status_code, 400)
+
+    def test_a_rejected_format_does_not_stamp_anything(self):
+        self._post(format="txt")
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_a_missing_roll_is_not_found(self):
+        response = self.client.post("/download_letter/", {"format": "pdf"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects(self):
+        self.assertEqual(self.client.get("/download_letter/").status_code, 302)
+
+    def test_a_seeded_system_template_exports_and_stamps(self):
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self._post(template_id=system.pk)
+        self.application.refresh_from_db()
+        self.assertEqual(self.application.generated_template, system)
+        self.assertTrue(self.application.generated_letter)
+
+    def test_the_filename_is_safe_for_an_awkward_name(self):
+        self.application.name = "Gita / Kc \"the best\""
+        self.application.save()
+        response = self._post()
+        disposition = response["Content-Disposition"]
+        self.assertNotIn("/", disposition.split("filename=")[1])
+
+    def test_a_broken_template_is_refused_and_stamps_nothing(self):
+        broken = CustomTemplates.objects.create(
+            template_name="Broken", template="{% if %}oops", professor=self.teacher,
+        )
+        response = self._post(template_id=broken.pk)
+        self.assertEqual(response.status_code, 302)
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertIsNone(self.application.generated_template)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_a_whitespace_only_template_is_refused_and_stamps_nothing(self):
+        blank = CustomTemplates.objects.create(
+            template_name="Blank", template="   \n\n  ", professor=self.teacher,
+        )
+        response = self._post(template_id=blank.pk)
+        self.assertEqual(response.status_code, 302)
+        self.application.refresh_from_db()
+        self.assertFalse(self.application.is_generated)
+        self.assertIsNone(self.application.generated_at)
+        self.assertIsNone(self.application.generated_template)
+        self.assertFalse(self.application.generated_letter)
+
+    def test_control_characters_in_edited_text_do_not_crash_the_docx(self):
+        import io
+        from docx import Document
+        for label, char in (
+            ("null", "\x00"), ("vtab", "\x0b"), ("formfeed", "\x0c"), ("bell", "\x07"),
+        ):
+            with self.subTest(label):
+                response = self._post(
+                    format="docx", edited_letter=f"BEFORE{char}AFTER",
+                )
+                self.assertEqual(response.status_code, 200)
+                texts = [
+                    p.text for p in Document(io.BytesIO(response.content)).paragraphs
+                ]
+                self.assertIn("BEFOREAFTER", texts)
+
+    def test_tabs_and_newlines_survive_the_control_character_strip(self):
+        import io
+        from docx import Document
+        response = self._post(format="docx", edited_letter="A\tB\nC\x00D")
+        texts = [p.text for p in Document(io.BytesIO(response.content)).paragraphs]
+        self.assertIn("A\tB\nCD", texts)
+
+    # Its own MEDIA_ROOT: the class-level one is created once at import time and
+    # shared by every method, and the filesystem is not rolled back between
+    # tests, so counting files there would count other tests' exports too.
+    @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+    def test_re_exporting_leaves_only_one_stored_file(self):
+        self._post()
+        self._post(format="docx")
+        self._post()
+        self.application.refresh_from_db()
+        stored = self.application.generated_letter
+        directory = os.path.dirname(stored.path)
+        self.assertEqual(os.listdir(directory), [os.path.basename(stored.name)])
+        # The surviving file must be the one the row points at, and be servable.
+        self.assertTrue(stored.storage.exists(stored.name))
+
+    def test_no_save_ever_persists_a_letter_without_its_metadata(self):
+        # ``save=False`` on the FileField write is load-bearing: it defers that
+        # write into the same UPDATE as the metadata. Without it, FieldFile.save
+        # issues its own UPDATE first, and any failure after that point leaves a
+        # torn row -- a live Re-download link with no timestamp or template, which
+        # the dashboard renders as em-dashes beside a working download.
+        from unittest.mock import patch
+        original_save = Application.save
+        snapshots = []
+
+        def record(instance, *args, **kwargs):
+            snapshots.append((
+                bool(instance.generated_letter),
+                instance.is_generated,
+                instance.generated_at is not None,
+            ))
+            return original_save(instance, *args, **kwargs)
+
+        with patch.object(Application, "save", record):
+            self._post()
+
+        self.assertTrue(snapshots, "the view never saved the application")
+        for has_file, is_generated, has_timestamp in snapshots:
+            if has_file:
+                self.assertTrue(
+                    is_generated and has_timestamp,
+                    "a save persisted the stored letter before its metadata",
+                )
+
+
+class DuplicateTemplateTests(TestCase):
+    """A professor can copy a system template into their own library (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof I", unique_id="T-I", email="i@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof J", unique_id="T-J", email="j@example.com", department=self.dept,
+        )
+        self.system = CustomTemplates.objects.filter(is_system=True).first()
+        self.client.cookies["unique"] = "T-I"
+
+    def test_duplicating_creates_an_owned_editable_copy(self):
+        response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.assertEqual(response.status_code, 302)
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(copy.template, self.system.template)
+        self.assertFalse(copy.is_system)
+        self.assertFalse(copy.is_default)
+
+    def test_the_copy_is_named_after_the_original(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(copy.template_name, f"{self.system.template_name} (copy)")
+
+    def test_duplicating_twice_does_not_collide(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        names = list(
+            CustomTemplates.objects.filter(professor=self.teacher)
+            .values_list("template_name", flat=True)
+        )
+        self.assertEqual(len(names), 2)
+        self.assertEqual(len(set(names)), 2)
+
+    def test_the_original_system_template_is_untouched(self):
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.system.refresh_from_db()
+        self.assertTrue(self.system.is_system)
+        self.assertIsNone(self.system.professor)
+
+    def test_a_professor_may_duplicate_their_own_template(self):
+        mine = CustomTemplates.objects.create(
+            template_name="Mine", template="body", professor=self.teacher
+        )
+        self.client.post("/duplicateTemplate", {"template_id": mine.pk})
+        self.assertEqual(
+            CustomTemplates.objects.filter(professor=self.teacher).count(), 2
+        )
+
+    def test_another_professors_template_cannot_be_duplicated(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="secret", professor=self.other
+        )
+        response = self.client.post("/duplicateTemplate", {"template_id": theirs.pk})
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_malformed_id_is_not_served(self):
+        for bad in ("abc", "", "-1", "999999"):
+            with self.subTest(value=bad):
+                response = self.client.post("/duplicateTemplate", {"template_id": bad})
+                self.assertEqual(response.status_code, 404)
+
+    def test_a_get_request_redirects_to_the_editor(self):
+        response = self.client.get("/duplicateTemplate")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_copy_is_immediately_selectable_for_generation(self):
+        from home.letters import select_template
+        self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
+        copy = CustomTemplates.objects.get(professor=self.teacher)
+        self.assertEqual(select_template(self.teacher, copy.pk), copy)
+
+    def test_a_long_name_does_not_overflow_the_column(self):
+        long_name = "L" * 95
+        source = CustomTemplates.objects.create(
+            template_name=long_name, template="body", professor=self.teacher
+        )
+        self.client.post("/duplicateTemplate", {"template_id": source.pk})
+        copy = CustomTemplates.objects.exclude(pk=source.pk).get(professor=self.teacher)
+        self.assertLessEqual(len(copy.template_name), 100)
+        copy.full_clean()  # would raise if the column width were exceeded
+
+    def test_repeatedly_duplicating_a_copy_stays_within_the_column(self):
+        # Each generation appends " (copy)"; without a bound this overflows.
+        current = CustomTemplates.objects.create(
+            template_name="T" * 80, template="body", professor=self.teacher
+        )
+        for _ in range(15):
+            self.client.post("/duplicateTemplate", {"template_id": current.pk})
+            current = CustomTemplates.objects.filter(
+                professor=self.teacher
+            ).order_by("-pk").first()
+            self.assertLessEqual(len(current.template_name), 100)
+            current.full_clean()
+
+    def test_many_duplicates_of_a_capped_name_all_get_distinct_names(self):
+        # A name already at the cap: naive truncation of the finished candidate
+        # would map every suffix onto one string and spin forever.
+        source = CustomTemplates.objects.create(
+            template_name="C" * 100, template="body", professor=self.teacher
+        )
+        for _ in range(5):
+            self.client.post("/duplicateTemplate", {"template_id": source.pk})
+        copies = CustomTemplates.objects.filter(professor=self.teacher).exclude(pk=source.pk)
+        names = list(copies.values_list("template_name", flat=True))
+        self.assertEqual(len(names), 5)
+        self.assertEqual(len(set(names)), 5)
+        for candidate in names:
+            self.assertLessEqual(len(candidate), 100)
+
+
+class TemplateEditorViewTests(TestCase):
+    """The editor lists system templates alongside the professor's own (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof K", unique_id="T-K", email="k@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof L", unique_id="T-L", email="l@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="My Own Template", template="body", professor=self.teacher
+        )
+        CustomTemplates.objects.create(
+            template_name="Not Mine At All", template="body", professor=self.other
+        )
+        self.client.cookies["unique"] = "T-K"
+
+    def test_the_professors_own_templates_are_listed(self):
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "My Own Template")
+
+    def test_system_templates_are_offered(self):
+        response = self.client.get("/makeTemplate")
+        self.assertContains(response, "Formal / Academic")
+
+    def test_another_professors_templates_are_not_shown(self):
+        response = self.client.get("/makeTemplate")
+        self.assertNotContains(response, "Not Mine At All")
+
+    def test_each_system_template_has_a_duplicate_button(self):
+        response = self.client.get("/makeTemplate")
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        self.assertContains(response, "/duplicateTemplate")
+        self.assertContains(response, f'name="template_id" value="{system.pk}"')
+
+    def test_a_stale_cookie_redirects_instead_of_crashing(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_no_cookie_redirects_instead_of_crashing(self):
+        del self.client.cookies["unique"]
+        response = self.client.get("/makeTemplate")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_system_list_survives_a_save(self):
+        # getTemplate re-renders the same page; the section must not vanish.
+        response = self.client.post("/getTemplate", {
+            "content": "Dear Committee", "templateName": "Fresh", "uid": "T-K",
+        })
+        self.assertContains(response, "Formal / Academic")
+
+
+class GetTemplateOwnershipTests(TestCase):
+    """Saving a template writes to the signed-in professor only (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof M", unique_id="T-M", email="m@example.com", department=self.dept,
+        )
+        self.victim = TeacherInfo.objects.create(
+            name="Prof N", unique_id="T-N", email="n@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-M"
+
+    def test_a_template_is_saved_to_the_signed_in_professor(self):
+        self.client.post("/getTemplate", {
+            "content": "Dear Committee", "templateName": "Mine", "uid": "T-M",
+        })
+        saved = CustomTemplates.objects.get(template_name="Mine")
+        self.assertEqual(saved.professor, self.teacher)
+
+    def test_a_forged_uid_cannot_write_to_another_professor(self):
+        self.client.post("/getTemplate", {
+            "content": "Injected", "templateName": "Forged", "uid": "T-N",
+        })
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.victim).exists())
+        self.assertTrue(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_forged_uid_cannot_clear_another_professors_default(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Their Default", template="body",
+            professor=self.victim, is_default=True,
+        )
+        self.client.post("/getTemplate", {
+            "content": "x", "templateName": "New", "is_default": "on", "uid": "T-N",
+        })
+        theirs.refresh_from_db()
+        self.assertTrue(theirs.is_default)
+
+    def test_marking_default_clears_the_previous_default(self):
+        old = CustomTemplates.objects.create(
+            template_name="Old", template="x", professor=self.teacher, is_default=True
+        )
+        self.client.post("/getTemplate", {
+            "content": "New body", "templateName": "New", "is_default": "on", "uid": "T-M",
+        })
+        old.refresh_from_db()
+        self.assertFalse(old.is_default)
+        self.assertTrue(CustomTemplates.objects.get(template_name="New").is_default)
+
+    def test_saving_the_same_name_updates_rather_than_duplicates(self):
+        self.client.post("/getTemplate", {
+            "content": "First", "templateName": "Same", "uid": "T-M",
+        })
+        self.client.post("/getTemplate", {
+            "content": "Second", "templateName": "Same", "uid": "T-M",
+        })
+        matches = CustomTemplates.objects.filter(
+            professor=self.teacher, template_name="Same"
+        )
+        self.assertEqual(matches.count(), 1)
+        self.assertIn("Second", matches.first().template)
+
+    def test_a_saved_template_never_becomes_a_system_template(self):
+        self.client.post("/getTemplate", {
+            "content": "x", "templateName": "Mine", "uid": "T-M",
+        })
+        self.assertFalse(CustomTemplates.objects.get(template_name="Mine").is_system)
+
+    def test_a_stale_cookie_redirects_to_login(self):
+        self.client.cookies["unique"] = "NOPE"
+        response = self.client.post("/getTemplate", {
+            "content": "x", "templateName": "y", "uid": "T-M",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/loginTeacher", response["Location"])
+
+    def test_a_get_request_redirects_to_the_editor(self):
+        response = self.client.get("/getTemplate")
+        self.assertEqual(response.status_code, 302)
+
+    def test_a_template_with_no_name_is_rejected(self):
+        response = self.client.post("/getTemplate", {"content": "x", "uid": "T-M"})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_blank_name_is_rejected(self):
+        response = self.client.post("/getTemplate", {
+            "content": "x", "templateName": "   ", "uid": "T-M",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+
+class TemplateEditorPrefillTests(TestCase):
+    """The editor must load a template without corrupting it (FR-3)."""
+
+    # A newline, an apostrophe, a double quote and a "<" so autoescaping is
+    # genuinely exercised rather than trivially satisfied.
+    BODY = 'Dear "Sir",\nIt\'s 5 < 6 & fine.\nRegards'
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Round Trip", template=self.BODY, professor=self.teacher
+        )
+        self.client.cookies["unique"] = "T-O"
+
+    def _option_attr(self, html):
+        import re
+        match = re.search(r'data-content="(.*?)" data-name', html, re.S)
+        self.assertIsNotNone(match, "the existing-template option was not rendered")
+        return match.group(1)
+
+    def test_the_dropdown_body_is_not_javascript_escaped(self):
+        html = self.client.get("/makeTemplate").content.decode()
+        attr = self._option_attr(html)
+        # escapejs turns every newline into the six literal characters \u000A,
+        # which getAttribute() hands to TinyMCE verbatim.
+        self.assertNotIn(r"\u000A", attr)
+        self.assertNotIn(r"\u0027", attr)
+        self.assertNotIn(r"\u003C", attr)
+
+    def test_the_dropdown_body_keeps_a_real_newline(self):
+        html = self.client.get("/makeTemplate").content.decode()
+        self.assertIn("\n", self._option_attr(html))
+
+    def test_the_dropdown_body_is_html_escaped_not_attribute_breaking(self):
+        attr = self._option_attr(self.client.get("/makeTemplate").content.decode())
+        # Autoescaping is what makes the attribute safe; a raw quote would end it.
+        self.assertNotIn('"', attr)
+        self.assertIn("&quot;", attr)
+        self.assertIn("&lt;", attr)
+
+    def test_the_after_save_block_is_not_nested_inside_a_script(self):
+        response = self.client.post("/getTemplate", {
+            "content": "Hello", "templateName": "Round Trip", "uid": "T-O",
+        })
+        html = response.content.decode()
+        self.assertContains(response, 'id="tmpbody"')
+        self.assertContains(response, 'id="tmpname"')
+        # The old bug: `... = {{ x|json_script }}` emitted a <script> inside a
+        # <script>, closing the outer one and killing the rest of the handler.
+        self.assertNotIn("= <script", html)
+
+    def test_the_after_save_block_is_absent_before_a_save(self):
+        response = self.client.get("/makeTemplate")
+        self.assertNotContains(response, 'id="tmpbody"')
+
+
+class NoHardcodedTemplatesTests(TestCase):
+    """Letter bodies live in the database, not in views.py (FR-1)."""
+
+    def test_views_no_longer_carries_a_hardcoded_letter(self):
+        import inspect
+        from home import views
+        source = inspect.getsource(views)
+        self.assertNotIn("default_template_content", source)
+
+    def test_the_seeding_helper_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "add_default_template_to_all_professors"))
+
+    def test_the_letter_bodies_come_from_the_database(self):
+        # The three system templates are the only shipped letter bodies now.
+        self.assertEqual(CustomTemplates.objects.filter(is_system=True).count(), 3)
+
+
+class DashboardTemplateLinkTests(TestCase):
+    """The dashboard points professors at the template library (FR-3)."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
+        )
+        self.client.cookies["unique"] = "T-O"
+
+    def test_the_dashboard_links_to_the_template_editor(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/makeTemplate")
+
+    def test_a_professor_with_no_default_is_told_about_the_starter_library(self):
+        response = self.client.get("/teacher")
+        self.assertContains(response, "starter template")
+
+    def test_a_professor_with_a_default_sees_its_name(self):
+        CustomTemplates.objects.create(
+            template_name="My Favourite", template="body",
+            professor=self.teacher, is_default=True,
+        )
+        response = self.client.get("/teacher")
+        self.assertContains(response, "My Favourite")
+        self.assertNotContains(response, "starter template")

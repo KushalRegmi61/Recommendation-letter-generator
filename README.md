@@ -129,19 +129,29 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
    combine, and both apply to the pending list *and* the recommended list — so you can answer
    "whom have I recommended who applied to the USA". **Clear** resets everything.
 5. The recommended-students table shows **when** each letter was generated, **which template**
-   produced it, and a **Re-download** link for letters whose file was stored. Entries show `—`
-   until letter generation starts recording that information.
-6. Create/edit your recommendation **templates**, then **generate** the letter (PDF/DOCX).
+   produced it, and a **Re-download** link for the stored file.
+6. **Templates.** Open **Create / Edit Templates**. Three starter templates ship with the app
+   (*Formal / Academic*, *Research / Graduate School*, *General Purpose*) — press **Duplicate**
+   on one to get your own editable copy, then edit and save it. Tick *default* to make a
+   template the one pre-selected for every new letter.
+7. **Generate.** Pick a template on the letter form, preview it, edit the text inline if you
+   want, then download as PDF or DOCX. The download is what gets stored and listed on your
+   dashboard.
 
 ### Admin
 - Manage programs, departments, teachers, templates, and all application data via `/admin/`.
+
+> **Note on PDF export.** The PDF writer only supports Latin-1 characters. The starter templates
+> are plain ASCII for this reason. Characters outside Latin-1 — em dashes, curly quotes, or a name
+> written in Devanagari — are replaced with `?` in the PDF. The DOCX export is unaffected and
+> renders them correctly.
 
 ---
 
 ## Running tests
 
 ```bash
-python manage.py test home                          # run the app's test suite (70 tests)
+python manage.py test home                          # run the app's test suite (228 tests)
 python manage.py test home.tests.ModelFieldTests    # a single test class
 ```
 
@@ -170,6 +180,7 @@ home/            Main app: models, views, urls, forms, migrations, tests
   intake.py      Student LOR-request form helpers (name composition, universities)
   filters.py     Professor dashboard filtering and student search
   dashboard.py   Single source of truth for the Teacher.html render context
+  letters.py     Letter context, template selection, rendering, PDF/DOCX export
 templates/       HTML templates (student/teacher/admin pages, letter templates)
 static/          CSS, fonts, images
 media/           Uploaded files (transcripts, CVs, photos, generated letters)
