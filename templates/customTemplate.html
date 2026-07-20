@@ -241,7 +241,13 @@ Good Luck!
         <select id="existing_templates" name="existing_template">
           <option value="">-- new template --</option>
           {% for tmp in templates %}
-            <option value="{{ tmp.pk }}" data-content="{{ tmp.template|escapejs }}" data-name="{{ tmp.template_name }}" data-default="{{ tmp.is_default }}">
+            <!-- No |escapejs here: these are HTML attributes read back with
+                 getAttribute(), not JS string literals. escapejs would emit
+                 literal
+ / ' text that the browser never decodes,
+                 corrupting the body on load. Autoescaping is the correct
+                 encoding for an attribute and round-trips cleanly. -->
+            <option value="{{ tmp.pk }}" data-content="{{ tmp.template }}" data-name="{{ tmp.template_name }}" data-default="{{ tmp.is_default }}">
               {{ tmp.template_name }}{% if tmp.is_default %} (default){% endif %}
             </option>
           {% endfor %}
@@ -307,16 +313,43 @@ Good Luck!
 }
 </style>
 
+<!-- json_script emits a complete <script> element, so it can only be used as a
+     standalone sibling. Interpolating it inside another <script> (as this block
+     used to) closes the enclosing tag at the HTML-parser level and destroys the
+     rest of the handler. The values are read back below with JSON.parse. -->
+{% if template %}
+{{ template.template_name|json_script:"tmpname" }}
+{{ template.template|json_script:"tmpbody" }}
+{{ template.is_default|json_script:"tmpdefault" }}
+{% endif %}
+
 <script>
   document.addEventListener('DOMContentLoaded', function() {
-    {% if template %}
-      // load values when coming back from save or editing
-      document.getElementById('templateName').value = {{ template.template_name|json_script:"tmpname" }};
-      if (tinymce.get('editor')) {
-        tinymce.get('editor').setContent({{ template.template|json_script:"tmpcontent" }});
+    // load values when coming back from save or editing
+    var nameEl = document.getElementById('tmpname');
+    if (!nameEl) {
+      return;
+    }
+    document.getElementById('templateName').value = JSON.parse(nameEl.textContent);
+    document.getElementById('is_default').checked =
+      JSON.parse(document.getElementById('tmpdefault').textContent);
+
+    var body = JSON.parse(document.getElementById('tmpbody').textContent);
+    // DOMContentLoaded can beat TinyMCE's own init, in which case setContent on
+    // a not-yet-initialised editor is dropped. Cover both orderings rather than
+    // silently skipping the load, which is what the old guard did.
+    var editor = tinymce.get('editor');
+    if (editor) {
+      if (editor.initialized) {
+        editor.setContent(body);
+      } else {
+        editor.on('init', function () { editor.setContent(body); });
       }
-      document.getElementById('is_default').checked = {{ template.is_default|yesno:"true,false" }};
-    {% endif %}
+    } else {
+      tinymce.on('AddEditor', function (e) {
+        e.editor.on('init', function () { e.editor.setContent(body); });
+      });
+    }
   });
 </script>
 

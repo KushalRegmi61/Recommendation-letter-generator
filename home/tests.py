@@ -2340,3 +2340,62 @@ class GetTemplateOwnershipTests(TestCase):
         })
         self.assertEqual(response.status_code, 302)
         self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+
+class TemplateEditorPrefillTests(TestCase):
+    """The editor must load a template without corrupting it (FR-3)."""
+
+    # A newline, an apostrophe, a double quote and a "<" so autoescaping is
+    # genuinely exercised rather than trivially satisfied.
+    BODY = 'Dear "Sir",\nIt\'s 5 < 6 & fine.\nRegards'
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
+        )
+        self.mine = CustomTemplates.objects.create(
+            template_name="Round Trip", template=self.BODY, professor=self.teacher
+        )
+        self.client.cookies["unique"] = "T-O"
+
+    def _option_attr(self, html):
+        import re
+        match = re.search(r'data-content="(.*?)" data-name', html, re.S)
+        self.assertIsNotNone(match, "the existing-template option was not rendered")
+        return match.group(1)
+
+    def test_the_dropdown_body_is_not_javascript_escaped(self):
+        html = self.client.get("/makeTemplate").content.decode()
+        attr = self._option_attr(html)
+        # escapejs turns every newline into the six literal characters \u000A,
+        # which getAttribute() hands to TinyMCE verbatim.
+        self.assertNotIn(r"\u000A", attr)
+        self.assertNotIn(r"\u0027", attr)
+        self.assertNotIn(r"\u003C", attr)
+
+    def test_the_dropdown_body_keeps_a_real_newline(self):
+        html = self.client.get("/makeTemplate").content.decode()
+        self.assertIn("\n", self._option_attr(html))
+
+    def test_the_dropdown_body_is_html_escaped_not_attribute_breaking(self):
+        attr = self._option_attr(self.client.get("/makeTemplate").content.decode())
+        # Autoescaping is what makes the attribute safe; a raw quote would end it.
+        self.assertNotIn('"', attr)
+        self.assertIn("&quot;", attr)
+        self.assertIn("&lt;", attr)
+
+    def test_the_after_save_block_is_not_nested_inside_a_script(self):
+        response = self.client.post("/getTemplate", {
+            "content": "Hello", "templateName": "Round Trip", "uid": "T-O",
+        })
+        html = response.content.decode()
+        self.assertContains(response, 'id="tmpbody"')
+        self.assertContains(response, 'id="tmpname"')
+        # The old bug: `... = {{ x|json_script }}` emitted a <script> inside a
+        # <script>, closing the outer one and killing the rest of the handler.
+        self.assertNotIn("= <script", html)
+
+    def test_the_after_save_block_is_absent_before_a_save(self):
+        response = self.client.get("/makeTemplate")
+        self.assertNotContains(response, 'id="tmpbody"')
