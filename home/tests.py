@@ -3422,13 +3422,37 @@ class PasswordResetSecurityTests(TestCase):
         self.assertNotIn("pw_reset_verified", self.client.session)
 
     def test_the_reset_flow_does_not_enumerate_usernames(self):
+        import re
         r_known = self.client.post("/otp", {"username": "victim_V-1"})
         r_unknown = self.client.post("/otp", {"username": "ghost_nobody"})
         self.assertEqual(r_known.status_code, r_unknown.status_code)
-        self.assertEqual(
-            [t.name for t in r_known.templates if t.name],
-            [t.name for t in r_unknown.templates if t.name],
-        )
+
+        # The page must never echo the account's email - that both confirms the
+        # username exists and hands the attacker the address.
+        self.assertNotIn(b"victim@example.com", r_known.content)
+        self.assertNotIn(b"victim@example.com", r_unknown.content)
+
+        # Bodies must otherwise be identical. The CSRF token is regenerated per
+        # response, so normalise it before comparing rather than asserting on
+        # raw bytes.
+        def normalise(body):
+            return re.sub(rb'value="[A-Za-z0-9]{32,}"', b'value="CSRF"', body)
+
+        self.assertEqual(normalise(r_known.content), normalise(r_unknown.content))
+
+    def test_starting_a_reset_but_skipping_otp_verification_changes_nothing(self):
+        # Populate pw_reset_user via /otp, then jump straight to /changePassword
+        # without ever submitting the OTP. The pw_reset_verified gate must stop
+        # it - this is the exact control the auditor mutated to reopen the hole.
+        self.client.post("/otp", {"username": "victim_V-1"})
+        self.assertEqual(self.client.session.get("pw_reset_user"), "victim_V-1")
+        self.assertNotIn("pw_reset_verified", self.client.session)
+        self.client.post("/changePassword", {
+            "password1": "skip-otp-pw", "password2": "skip-otp-pw",
+        })
+        self.user.refresh_from_db()
+        self.assertTrue(check_password("original-pw", self.user.password))
+        self.assertFalse(check_password("skip-otp-pw", self.user.password))
 
     def test_the_otp_is_one_shot(self):
         self.client.post("/otp", {"username": "victim_V-1"})
