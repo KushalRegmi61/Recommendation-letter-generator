@@ -54,6 +54,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="changeStudentName" method="POST">
+                    {% csrf_token %}
 
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Name</h5>
                       <input type="text" class="form-control" id="old_username" name="old_username"
@@ -92,6 +93,7 @@
                   </div>
                   <div class="modal-body">
                     <form action="studentPasswordChange" method="POST">
+                    {% csrf_token %}
                       
                       <h5 for="exampleInputEmail1" class="text-secondary" style="margin:10px;">Old Password</h5>
                       <input type="password" class="form-control" id="myInput" name="old_password"

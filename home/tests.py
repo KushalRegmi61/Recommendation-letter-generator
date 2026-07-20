@@ -3704,3 +3704,33 @@ class SafeMailTests(TestCase):
             TeacherInfo.objects.filter(email="mailfails@example.com").exists()
         )
         self.assertTrue(User.objects.filter(email="mailfails@example.com").exists())
+
+
+class CsrfProtectionTests(TestCase):
+    """CSRF middleware is active and every POST form carries a token."""
+
+    def test_the_middleware_is_enabled(self):
+        from django.conf import settings as dj
+        self.assertIn("django.middleware.csrf.CsrfViewMiddleware", dj.MIDDLEWARE)
+
+    def test_every_post_form_template_has_a_token(self):
+        import re
+        from pathlib import Path
+        from django.conf import settings as dj
+        offenders = []
+        for path in sorted((Path(dj.BASE_DIR) / "templates").rglob("*.html")):
+            text = path.read_text(errors="replace")
+            for match in re.finditer(
+                r"<form[^>]*method=[\"']post[\"'][^>]*>", text, re.I
+            ):
+                tail = text[match.end():match.end() + 400]
+                if "csrf_token" not in tail:
+                    line = text[:match.start()].count("\n") + 1
+                    offenders.append(f"{path.name}:{line}")
+        self.assertEqual(offenders, [], f"POST forms without a CSRF token: {offenders}")
+
+    def test_a_post_without_a_token_is_rejected(self):
+        from django.test import Client
+        enforcing = Client(enforce_csrf_checks=True)
+        response = enforcing.post("/loginAdmin", {"username": "x", "password": "y"})
+        self.assertEqual(response.status_code, 403)

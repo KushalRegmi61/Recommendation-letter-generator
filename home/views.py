@@ -15,7 +15,6 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.contrib.auth import logout, authenticate, login
 from django.contrib.auth.forms import AuthenticationForm
-from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from .forms import TeacherInfoForm
 from home.identity import current_teacher, current_student, set_student_cookie
@@ -1864,7 +1863,6 @@ def download_generated(request):
     )
 
 
-@csrf_exempt
 def download_letter(request):
     """Export a letter as PDF/DOCX, store a copy, and record the FR-5 tracking fields."""
     if request.method != "POST":
