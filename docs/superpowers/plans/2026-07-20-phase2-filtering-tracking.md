@@ -432,6 +432,21 @@ Add these methods to `ApplicationFilterTests`. They rely on the `setUp` from Tas
         )
         self.assertEqual([a.pk for a in result], [self.app_bct.pk])
 
+    def test_search_terms_are_anded_regardless_of_word_order(self):
+        self.app_bce.first_name = "Ramesh"
+        self.app_bce.last_name = "Shrestha"
+        self.app_bce.save()
+        result = apply_application_filters(self.base_qs(), {"q": "shrestha ramesh"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_search_terms_may_match_different_fields(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bce"})
+        self.assertEqual([a.pk for a in result], [self.app_bce.pk])
+
+    def test_every_term_must_match(self):
+        result = apply_application_filters(self.base_qs(), {"q": "bob 080bct"})
+        self.assertEqual(result.count(), 0)
+
     def test_search_does_not_match_university_name(self):
         # University search is the dropdowns' job; matching it here would
         # surprise a professor searching for a person.
@@ -477,11 +492,21 @@ Then add the search clause inside `apply_application_filters`, immediately after
 ```python
     search = (params.get("q") or "").strip()
     if search:
-        matches = Q()
-        for field in SEARCH_FIELDS:
-            matches |= Q(**{f"{field}__icontains": search})
-        queryset = queryset.filter(matches)
+        # Each whitespace-separated term must match SOME field (AND of ORs), so
+        # "shrestha ramesh" finds "Ramesh Shrestha" despite the word order, and
+        # "ramesh 080bct" can match the name and the roll number separately.
+        for term in search.split():
+            matches = Q()
+            for field in SEARCH_FIELDS:
+                matches |= Q(**{f"{field}__icontains": term})
+            queryset = queryset.filter(matches)
 ```
+
+Substring matching (`icontains` → SQL `LIKE '%term%'`) is deliberate: a professor
+typing `esh` or a partial roll number `080BCT` expects a hit, which word-indexed
+full-text search would not give. No index is added — one professor's applications
+number in the tens, so the scan is trivially fast. If this ever grew into the
+thousands, the upgrade path is Postgres + `pg_trgm`, not a search engine.
 
 And update the `distinct()` condition so a search joined with a to-many filter still
 de-duplicates:
@@ -500,7 +525,7 @@ cannot duplicate rows. Leave it as-is; this step is a check, not an edit.)
 
 Run: `python manage.py test home.tests.ApplicationFilterTests -v 2`
 
-Expected: PASS (15 tests).
+Expected: PASS (18 tests).
 
 - [ ] **Step 5: Commit**
 
