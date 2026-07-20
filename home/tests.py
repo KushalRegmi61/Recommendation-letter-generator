@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from home.models import (
     Application, University, Academics, Department, Program,
-    StudentLoginInfo, TeacherInfo, CustomTemplates,
+    StudentLoginInfo, TeacherInfo, CustomTemplates, Qualities,
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
@@ -868,3 +868,165 @@ class SystemTemplateModelTests(TestCase):
             template_name="Formal", template="x", professor=None, is_system=True
         )
         self.assertIn("Formal", str(tpl))
+
+
+class SeededSystemTemplateTests(TestCase):
+    """The data migration must ship a usable starter library (FR-1)."""
+
+    def test_three_system_templates_are_seeded(self):
+        seeded = CustomTemplates.objects.filter(is_system=True)
+        self.assertEqual(seeded.count(), 3)
+
+    def test_seeded_templates_have_names_and_bodies(self):
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                self.assertTrue(tpl.template_name)
+                self.assertGreater(len(tpl.template), 100)
+                self.assertIsNone(tpl.professor)
+                self.assertFalse(tpl.is_default)
+
+    def test_seeded_templates_are_ascii_only(self):
+        # The PDF export encodes latin-1; a stray em dash crashes the download.
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                tpl.template.encode("ascii")
+
+    def test_seeded_templates_are_valid_jinja(self):
+        from jinja2 import Template
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                Template(tpl.template)  # raises TemplateSyntaxError if malformed
+
+    def test_seeded_templates_render_without_leaking_none(self):
+        """A sparse application must not put the literal word None in the prose."""
+        from jinja2 import Template
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof Q", unique_id="T-Q", email="q@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Sparse Student", roll_number="080BCT500", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Sparse Student", std=student, professor=teacher,
+        )
+        # Every satellite object is absent, as it is for a barely-filled request.
+        context = {
+            "app": application, "teacher": teacher, "academics": None,
+            "paper": None, "project": None, "university": None, "quality": None,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            with self.subTest(name=tpl.template_name):
+                letter = Template(tpl.template).render(context)
+                self.assertNotIn("None", letter)
+                self.assertIn("Sparse Student", letter)
+                # No paragraph may be bare punctuation left by an empty branch.
+                for line in letter.splitlines():
+                    self.assertNotIn(line.strip(), (".", ",", "-"))
+
+    def test_seeded_paragraphs_are_single_source_lines(self):
+        """The PDF exporter does not reflow across newlines, so a sentence
+        split over two source lines becomes two ragged lines in the export."""
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            for line in tpl.template.splitlines():
+                stripped = line.strip()
+                # A line that ends mid-sentence has broken a paragraph in two.
+                if stripped and not stripped.startswith("{%") and len(stripped) > 60:
+                    with self.subTest(name=tpl.template_name, line=stripped[:40]):
+                        self.assertTrue(
+                            stripped.endswith((".", "}", "%}", '"', "!")),
+                            f"paragraph broken mid-sentence: {stripped!r}",
+                        )
+
+    def _render_seeded(self, context):
+        from jinja2 import Template
+        return [
+            (tpl.template_name, Template(tpl.template).render(context))
+            for tpl in CustomTemplates.objects.filter(is_system=True)
+        ]
+
+    def test_blank_related_rows_do_not_leave_holes_in_the_prose(self):
+        """Guards must fire for rows that EXIST but whose fields are blank.
+
+        The sparse case above passes None for every satellite object, so the
+        guards on dept_name/program_name/gpa are never actually exercised. Here
+        the rows exist and the fields are empty, which is the realistic shape:
+        Department.dept_name and Program.program_name are NOT NULL but
+        blank=True, so the empty value is "" and dropping a guard leaves a
+        doubled space ("studies in  at the Institute"), not the word "None".
+        """
+        dept = Department.objects.create(dept_name="")
+        program = Program.objects.create(program_name="", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof B", unique_id="T-B", email="b@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Blank Student", roll_number="080BCT501", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Blank Student", std=student, professor=teacher,
+        )
+        # The row exists but carries no grade, so the GPA sentence must not run.
+        academics = Academics.objects.create(
+            application=application, gpa="", tentative_ranking="",
+        )
+        context = {
+            "app": application, "teacher": teacher, "academics": academics,
+            "paper": None, "project": None, "university": None, "quality": None,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        for name, letter in self._render_seeded(context):
+            with self.subTest(name=name):
+                self.assertIn("Blank Student", letter)
+                self.assertNotIn("None", letter)
+                # An unguarded blank field collapses to "" and doubles a space.
+                self.assertNotIn("  ", letter)
+                # academics is truthy but has no gpa: the whole sentence goes.
+                self.assertNotIn("GPA", letter)
+
+    def test_seeded_templates_are_grammatical_for_plural_pronouns(self):
+        """Students with unset gender get They/them/Their, which must not
+        collide with third-person-singular verbs ("They has maintained")."""
+        from jinja2 import Template
+        dept = Department.objects.create(dept_name="BEI")
+        program = Program.objects.create(program_name="BE-BEI", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Prof Z", unique_id="T-Z", email="z@example.com", department=dept,
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Plural Student", roll_number="080BEI777", department=dept,
+            program=program, password="x", dob="2000-01-01",
+        )
+        application = Application.objects.create(
+            name="Plural Student", std=student, professor=teacher,
+            subjects="Control Systems", is_paper=True,
+        )
+        academics = Academics.objects.create(application=application, gpa="3.75")
+        quality = Qualities.objects.create(
+            application=application, leadership=True, hardworking=True,
+            teamwork=True, friendly=True, quality="unfailingly curious",
+        )
+        context = {
+            "app": application, "teacher": teacher, "academics": academics,
+            "paper": None, "project": None, "university": None, "quality": quality,
+            "pronoun": "They", "pronoun_obj": "them", "pronoun_pos": "Their",
+            "rel_desc": "teacher", "strength_phrase": "with great enthusiasm",
+            "deadline": "", "today": "July 20, 2026",
+        }
+        singular_verbs = (
+            "They has", "they has", "They is", "they is", "They shows",
+            "they shows", "They works", "they works", "They holds", "they holds",
+        )
+        for tpl in CustomTemplates.objects.filter(is_system=True):
+            letter = Template(tpl.template).render(context)
+            for bad in singular_verbs:
+                with self.subTest(name=tpl.template_name, phrase=bad):
+                    self.assertNotIn(bad, letter)
