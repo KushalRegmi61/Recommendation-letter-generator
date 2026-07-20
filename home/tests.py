@@ -3147,3 +3147,104 @@ class UniqueCookieRetiredTests(TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("unique", response.cookies)
+
+
+class UsernameCookieImpersonationTests(TestCase):
+    """A forged username cookie must not reach another professor's account."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.victim = TeacherInfo.objects.create(
+            name="Victim Prof", unique_id="T-UVIC", email="uvic@example.com",
+            phone="1111111111", department=self.dept,
+        )
+        self.victim_user = User.objects.create_user(
+            username="victimuser", password="victim-pw", email="uvic@example.com",
+        )
+        # The legacy "Full Name/<unique_id>" convention the account views used to
+        # walk from the cookie's User to a TeacherInfo.
+        self.victim_user.first_name = "Victim Prof/T-UVIC"
+        self.victim_user.save()
+        self.victim.user = self.victim_user
+        self.victim.save()
+        self.attacker = TeacherInfo.objects.create(
+            name="Attacker Prof", unique_id="T-UATK", email="uatk@example.com",
+            department=self.dept,
+        )
+
+    def test_a_forged_cookie_cannot_change_another_professors_password(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/userPasswordChange", {
+            "old_password": "test-pw",
+            "new_password": "hijacked",
+            "confirm_password": "hijacked",
+        })
+        self.victim_user.refresh_from_db()
+        self.assertTrue(self.victim_user.check_password("victim-pw"))
+
+    def test_a_forged_cookie_cannot_change_another_professors_email(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/changeEmail", {"new_email": "attacker@evil.example"})
+        self.victim.refresh_from_db()
+        self.victim_user.refresh_from_db()
+        self.assertNotEqual(self.victim_user.email, "attacker@evil.example")
+        self.assertNotEqual(self.victim.email, "attacker@evil.example")
+
+    def test_a_forged_cookie_cannot_change_another_professors_phone(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        before = self.victim.phone
+        self.client.post("/changePhone", {"new_phone": "9999999999"})
+        self.victim.refresh_from_db()
+        self.assertEqual(self.victim.phone, before)
+
+    def test_a_forged_cookie_cannot_change_another_professors_title(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.cookies["username"] = "victimuser"
+        before = self.victim.title
+        self.client.post("/changeTitle", {"new_title": "Janitor"})
+        self.victim.refresh_from_db()
+        self.assertEqual(self.victim.title, before)
+
+    def test_an_anonymous_forged_cookie_changes_nothing(self):
+        self.client.cookies["username"] = "victimuser"
+        self.client.post("/userPasswordChange", {
+            "old_password": "victim-pw",
+            "new_password": "hijacked",
+            "confirm_password": "hijacked",
+        })
+        self.victim_user.refresh_from_db()
+        self.assertTrue(self.victim_user.check_password("victim-pw"))
+
+    def test_a_professor_can_still_change_their_own_password(self):
+        user = login_as_teacher(self.client, self.attacker)
+        self.client.post("/userPasswordChange", {
+            "old_password": "test-pw",
+            "new_password": "brand-new-pw",
+            "confirm_password": "brand-new-pw",
+        })
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("brand-new-pw"))
+
+    def test_a_professor_can_still_change_their_own_email(self):
+        login_as_teacher(self.client, self.attacker)
+        self.client.post("/changeEmail", {"new_email": "mine@example.com"})
+        self.attacker.refresh_from_db()
+        self.assertEqual(self.attacker.email, "mine@example.com")
+
+    def test_login_does_not_set_a_username_cookie(self):
+        teacher = TeacherInfo.objects.create(
+            name="Recent Prof", unique_id="T-URCU", email="rcu@example.com",
+            department=self.dept,
+        )
+        user = User.objects.create_user(
+            username="rcu", password="pw", email="rcu@example.com",
+        )
+        teacher.user = user
+        teacher.save()
+        response = self.client.post("/loginTeacher", {
+            "username": "rcu@example.com", "password": "pw",
+        })
+        self.assertNotIn("username", response.cookies)

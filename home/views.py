@@ -917,9 +917,8 @@ def loginTeacher(request):
 
                 context = build_teacher_dashboard_context(unique, request.GET)
                 response = render(request, "Teacher.html", context)
-                # The "unique" cookie is no longer issued: identity resolves from
-                # the session via current_teacher().
-                response.set_cookie("username", user.username)
+                # Neither the "unique" nor the "username" cookie is issued any
+                # more: identity resolves from the session via current_teacher().
                 return response
             else:
                 messages.error(request, "Sorry!  The Password doesnot match.")
@@ -1238,15 +1237,16 @@ def userPasswordChange(request):
         new_password = request.POST.get("new_password")
         confirm_password = request.POST.get("confirm_password")
 
-        # to obtain old password,
-        user = User.objects.get(username=request.COOKIES.get("username"))
-        current_password = request.user.password
+        # The account being changed is the session's account. It used to be
+        # looked up from the client-set "username" cookie, which let anyone
+        # forge another professor's username and reset their password.
+        user = request.user
+        current_password = user.password
 
         # confirming typed old password is true or not
         old_new_check = check_password(typed_password, current_password)
         if old_new_check:
             if new_password == confirm_password:
-                user = User.objects.get(username=request.COOKIES.get("username"))
                 user.set_password(new_password)
                 user.save()
                 messages.success(request, "Password has been changed successfully.")
@@ -1295,24 +1295,17 @@ def studentPasswordChange(request):
 def changeTitle(request):
     if request.method == "POST":
         new_title = request.POST.get("new_title")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.title = new_title
             teacher.save()
 
             messages.success(request, "Title has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
@@ -1320,24 +1313,17 @@ def changeTitle(request):
 def changePhone(request):
     if request.method == "POST":
         new_phone = request.POST.get("new_phone")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.phone = new_phone
             teacher.save()
 
             messages.success(request, "Phone Number has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
@@ -1345,44 +1331,33 @@ def changePhone(request):
 def changeEmail(request):
     if request.method == "POST":
         new_email = request.POST.get("new_email")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             teacher.email = new_email
             teacher.save()
 
-            user = User.objects.get(username=usernaam)
+            user = teacher.user
+            if user is None:
+                messages.error(request, "No login account is linked to this professor.")
+                return redirect("/loginTeacher")
             user.email = new_email
             user.save()
 
             messages.success(request, "Email has been changed successfully.")
             return redirect(userDetails)
         else:
-            messages.error(request, "No such Teacher exists. ")
-            return redirect(userDetails)
+            messages.error(request, "You are not signed in as a professor.")
+            return redirect("/loginTeacher")
 
     return redirect(userDetails)
 
 def addSubjects(request):
     if request.method == "POST":
         subject= request.POST.get("subject")
-        usernaam = request.COOKIES.get("username")
-
-        user = User.objects.get(username=usernaam)
-        full_name = user.get_full_name()
-        x = full_name.split("/")
-
-        unique = x[-1]
-      
-        if TeacherInfo.objects.filter(unique_id=unique).exists():
-            teacher = TeacherInfo.objects.get(unique_id=unique)
+        # Identity comes from the session, not from a client-set cookie.
+        teacher = current_teacher(request)
+        if teacher is not None:
             naya_subject=Subject.objects.get(name=subject)
             # to check if subject is in teacher model or not
             check=[]
@@ -1408,8 +1383,6 @@ def deleteSubjects(request):
    
     if request.method == "POST":
         subject= request.POST.get("subject")
-        usernaam = request.COOKIES.get("username")
-
         teacher = current_teacher(request)
         if teacher is not None:
             naya_subject=Subject.objects.get(sub_name=subject)
