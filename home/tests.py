@@ -651,7 +651,7 @@ class TeacherDashboardViewTests(TestCase):
         University.objects.create(
             uni_name="Aalto", country="Finland", application=self.fin_app,
         )
-        self.client.cookies["unique"] = "T400"
+        login_as_teacher(self.client, self.prof)
         self.client.cookies["username"] = "Prof Four"
 
     def test_teacher_view_renders_all_applications_by_default(self):
@@ -787,15 +787,16 @@ class TeacherDashboardViewTests(TestCase):
         self.assertNotIn("SecretU", response.context["filter_options"]["colleges"])
         self.assertNotIn("BEX", response.context["filter_options"]["departments"])
 
-    def test_teacher_view_redirects_when_cookie_is_missing(self):
-        del self.client.cookies["unique"]
+    def test_teacher_view_redirects_when_not_signed_in(self):
+        self.client.logout()
         response = self.client.get("/teacher")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
 
-    def test_teacher_view_redirects_when_cookie_is_stale(self):
-        # A professor whose TeacherInfo was removed, or a hand-edited cookie.
-        self.client.cookies["unique"] = "T000-does-not-exist"
+    def test_teacher_view_redirects_when_only_a_forged_cookie_is_present(self):
+        # No session, but a hand-edited cookie naming a real professor.
+        self.client.logout()
+        self.client.cookies["unique"] = "T400"
         response = self.client.get("/teacher", {"country": "USA"})
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
@@ -846,7 +847,7 @@ class DownloadGeneratedTests(TestCase):
             name="eve legacy", email="e@example.com", professor=self.prof,
             std=stu, is_generated=True,
         )
-        self.client.cookies["unique"] = "T500"
+        login_as_teacher(self.client, self.prof)
 
     def test_returns_stored_file(self):
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
@@ -860,18 +861,19 @@ class DownloadGeneratedTests(TestCase):
         self.assertEqual(response["Location"], "/teacher")
 
     def test_other_professors_letter_is_not_served(self):
-        self.client.cookies["unique"] = "T501"
+        login_as_teacher(self.client, self.other)
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 404)
 
     def test_anonymous_request_is_sent_to_the_login_page(self):
-        del self.client.cookies["unique"]
+        self.client.logout()
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
 
-    def test_unknown_professor_cookie_is_sent_to_the_login_page(self):
-        self.client.cookies["unique"] = "T-does-not-exist"
+    def test_forged_cookie_without_a_session_is_sent_to_the_login_page(self):
+        self.client.logout()
+        self.client.cookies["unique"] = "T500"
         response = self.client.get(f"/download_generated/?id={self.stored.pk}")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "/loginTeacher")
@@ -1738,7 +1740,7 @@ class RenderCustomViewTests(TestCase):
             template_name="Fallback", template="FALLBACK", professor=self.teacher,
             is_default=True,
         )
-        self.client.cookies["unique"] = "T-F"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_selected_template_is_rendered(self):
         response = self.client.post("/renderCustom", {
@@ -1785,8 +1787,8 @@ class RenderCustomViewTests(TestCase):
         self.assertFalse(quality.social)
         self.assertEqual(quality.quality, "diligent")
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/renderCustom", {"roll": "080BCT007"})
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -1795,7 +1797,7 @@ class RenderCustomViewTests(TestCase):
         other = TeacherInfo.objects.create(
             name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-G"
+        login_as_teacher(self.client, other)
         response = self.client.post("/renderCustom", {"roll": "080BCT007"})
         self.assertEqual(response.status_code, 404)
 
@@ -1861,14 +1863,12 @@ class MakeLetterTemplateListTests(TestCase):
 
     def test_the_picker_offers_system_templates(self):
         self.client.force_login(self.user)
-        self.client.cookies["unique"] = "T-H"
         response = self.client.post("/makeLetter", {"roll": "080BCT321"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Formal / Academic")
 
     def test_the_picker_posts_a_template_id(self):
         self.client.force_login(self.user)
-        self.client.cookies["unique"] = "T-H"
         response = self.client.post("/makeLetter", {"roll": "080BCT321"})
         self.assertContains(response, 'name="template_id"')
         self.assertNotContains(response, 'name="temp"')
@@ -1895,7 +1895,7 @@ class DownloadLetterTests(TestCase):
             template_name="Export", template="EXPORTED for {{ app.name }}",
             professor=self.teacher,
         )
-        self.client.cookies["unique"] = "T-G"
+        login_as_teacher(self.client, self.teacher)
 
     def _post(self, **extra):
         payload = {"roll": "080BCT099", "format": "pdf", "template_id": self.tpl.pk}
@@ -1978,14 +1978,14 @@ class DownloadLetterTests(TestCase):
         )
 
     def test_another_professor_cannot_export_this_letter(self):
-        TeacherInfo.objects.create(
+        other = TeacherInfo.objects.create(
             name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-H"
+        login_as_teacher(self.client, other)
         self.assertEqual(self._post().status_code, 404)
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self._post()
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -2125,7 +2125,7 @@ class DuplicateTemplateTests(TestCase):
             name="Prof J", unique_id="T-J", email="j@example.com", department=self.dept,
         )
         self.system = CustomTemplates.objects.filter(is_system=True).first()
-        self.client.cookies["unique"] = "T-I"
+        login_as_teacher(self.client, self.teacher)
 
     def test_duplicating_creates_an_owned_editable_copy(self):
         response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
@@ -2173,8 +2173,8 @@ class DuplicateTemplateTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/duplicateTemplate", {"template_id": self.system.pk})
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
@@ -2252,7 +2252,7 @@ class TemplateEditorViewTests(TestCase):
         CustomTemplates.objects.create(
             template_name="Not Mine At All", template="body", professor=self.other
         )
-        self.client.cookies["unique"] = "T-K"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_professors_own_templates_are_listed(self):
         response = self.client.get("/makeTemplate")
@@ -2273,14 +2273,15 @@ class TemplateEditorViewTests(TestCase):
         self.assertContains(response, "/duplicateTemplate")
         self.assertContains(response, f'name="template_id" value="{system.pk}"')
 
-    def test_a_stale_cookie_redirects_instead_of_crashing(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_a_forged_cookie_redirects_instead_of_crashing(self):
+        self.client.logout()
+        self.client.cookies["unique"] = "T-K"
         response = self.client.get("/makeTemplate")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/loginTeacher", response["Location"])
 
-    def test_no_cookie_redirects_instead_of_crashing(self):
-        del self.client.cookies["unique"]
+    def test_an_unauthenticated_request_redirects_instead_of_crashing(self):
+        self.client.logout()
         response = self.client.get("/makeTemplate")
         self.assertEqual(response.status_code, 302)
 
@@ -2303,7 +2304,7 @@ class GetTemplateOwnershipTests(TestCase):
         self.victim = TeacherInfo.objects.create(
             name="Prof N", unique_id="T-N", email="n@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-M"
+        login_as_teacher(self.client, self.teacher)
 
     def test_a_template_is_saved_to_the_signed_in_professor(self):
         self.client.post("/getTemplate", {
@@ -2360,8 +2361,8 @@ class GetTemplateOwnershipTests(TestCase):
         })
         self.assertFalse(CustomTemplates.objects.get(template_name="Mine").is_system)
 
-    def test_a_stale_cookie_redirects_to_login(self):
-        self.client.cookies["unique"] = "NOPE"
+    def test_an_unauthenticated_request_redirects_to_login(self):
+        self.client.logout()
         response = self.client.post("/getTemplate", {
             "content": "x", "templateName": "y", "uid": "T-M",
         })
@@ -2400,7 +2401,7 @@ class TemplateEditorPrefillTests(TestCase):
         self.mine = CustomTemplates.objects.create(
             template_name="Round Trip", template=self.BODY, professor=self.teacher
         )
-        self.client.cookies["unique"] = "T-O"
+        login_as_teacher(self.client, self.teacher)
 
     def _option_attr(self, html):
         import re
@@ -2470,7 +2471,7 @@ class DashboardTemplateLinkTests(TestCase):
         self.teacher = TeacherInfo.objects.create(
             name="Prof O", unique_id="T-O", email="o@example.com", department=self.dept,
         )
-        self.client.cookies["unique"] = "T-O"
+        login_as_teacher(self.client, self.teacher)
 
     def test_the_dashboard_links_to_the_template_editor(self):
         response = self.client.get("/teacher")
@@ -2511,7 +2512,7 @@ class QualityPersistenceTests(TestCase):
         self.tpl = CustomTemplates.objects.create(
             template_name="Q", template="{{ app.name }}", professor=self.teacher,
         )
-        self.client.cookies["unique"] = "T-P"
+        login_as_teacher(self.client, self.teacher)
 
     def _post(self, **extra):
         payload = {"roll": "080BCT770", "template_id": self.tpl.pk}
@@ -2585,7 +2586,6 @@ class MissingUploadTests(TestCase):
         self.user.first_name = "Prof R/T-R"
         self.user.save()
         self.client.force_login(self.user)
-        self.client.cookies["unique"] = "T-R"
 
     def test_the_letter_form_renders_without_any_uploads(self):
         response = self.client.post("/makeLetter", {"roll": "080BCT880"})
@@ -2628,7 +2628,7 @@ class QualitiesUniquenessTests(TestCase):
         self.tpl = CustomTemplates.objects.create(
             template_name="U", template="{{ app.name }}", professor=self.teacher,
         )
-        self.client.cookies["unique"] = "T-U"
+        login_as_teacher(self.client, self.teacher)
 
     def test_a_second_qualities_row_for_one_application_is_rejected(self):
         Qualities.objects.create(application=self.application)
