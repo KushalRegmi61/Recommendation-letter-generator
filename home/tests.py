@@ -3560,3 +3560,39 @@ class SettingsHygieneTests(TestCase):
         from pathlib import Path
         from django.conf import settings as dj
         self.assertIn(".env", (Path(dj.BASE_DIR) / ".gitignore").read_text())
+
+
+class SecuritySettingsTests(TestCase):
+    """Production-grade cookie and transport settings are configured."""
+
+    def test_clickjacking_protection_is_not_disabled(self):
+        from django.conf import settings as dj
+        self.assertNotEqual(dj.X_FRAME_OPTIONS, "ALLOWALL")
+        self.assertIn(dj.X_FRAME_OPTIONS, ("DENY", "SAMEORIGIN"))
+
+    def test_session_cookies_are_httponly(self):
+        from django.conf import settings as dj
+        self.assertTrue(dj.SESSION_COOKIE_HTTPONLY)
+
+    def test_content_type_sniffing_is_disabled(self):
+        from django.conf import settings as dj
+        self.assertTrue(dj.SECURE_CONTENT_TYPE_NOSNIFF)
+
+    def test_samesite_is_set_on_session_and_csrf_cookies(self):
+        from django.conf import settings as dj
+        self.assertEqual(dj.SESSION_COOKIE_SAMESITE, "Lax")
+        self.assertEqual(dj.CSRF_COOKIE_SAMESITE, "Lax")
+
+    def test_secure_cookies_follow_debug(self):
+        # In DEBUG (local HTTP) secure cookies must be off or nothing works;
+        # with DEBUG off they must be on.
+        #
+        # Compare against auth.settings.DEBUG, not django.conf.settings.DEBUG:
+        # the test runner forces settings.DEBUG to False for the duration of
+        # the run, so django.conf would report False no matter how the app is
+        # actually configured. The module attribute is the value the secure
+        # cookie flags were computed from.
+        from django.conf import settings as dj
+        from auth.settings import DEBUG as CONFIGURED_DEBUG
+        self.assertEqual(dj.SESSION_COOKIE_SECURE, not CONFIGURED_DEBUG)
+        self.assertEqual(dj.CSRF_COOKIE_SECURE, not CONFIGURED_DEBUG)
