@@ -2399,3 +2399,21 @@ class TemplateEditorPrefillTests(TestCase):
     def test_the_after_save_block_is_absent_before_a_save(self):
         response = self.client.get("/makeTemplate")
         self.assertNotContains(response, 'id="tmpbody"')
+
+
+class NoHardcodedTemplatesTests(TestCase):
+    """Letter bodies live in the database, not in views.py (FR-1)."""
+
+    def test_views_no_longer_carries_a_hardcoded_letter(self):
+        import inspect
+        from home import views
+        source = inspect.getsource(views)
+        self.assertNotIn("default_template_content", source)
+
+    def test_the_seeding_helper_is_gone(self):
+        from home import views
+        self.assertFalse(hasattr(views, "add_default_template_to_all_professors"))
+
+    def test_the_letter_bodies_come_from_the_database(self):
+        # The three system templates are the only shipped letter bodies now.
+        self.assertEqual(CustomTemplates.objects.filter(is_system=True).count(), 3)
