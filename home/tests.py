@@ -4,6 +4,7 @@ from home.models import (
     Application, University, Academics, Department, Program,
     StudentLoginInfo, TeacherInfo,
 )
+from home.filters import apply_application_filters
 
 
 class ModelFieldTests(TestCase):
@@ -292,3 +293,52 @@ class Studentform1RenderTests(TestCase):
             'name="weak_points"',
         ]:
             self.assertIn(field, html, f"missing input: {field}")
+
+
+class ApplicationFilterTests(TestCase):
+    def setUp(self):
+        self.dept_bct = Department.objects.create(dept_name="BCT")
+        self.dept_bce = Department.objects.create(dept_name="BCE")
+        prog_bct = Program.objects.create(program_name="BE-BCT", department=self.dept_bct)
+        prog_bce = Program.objects.create(program_name="BE-BCE", department=self.dept_bce)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T100", name="Prof One", email="p1@example.com",
+            department=self.dept_bct,
+        )
+        self.stu_bct = StudentLoginInfo.objects.create(
+            username="alice", roll_number="080BCT001", department=self.dept_bct,
+            program=prog_bct, password="x", dob="2000-01-01",
+        )
+        self.stu_bce = StudentLoginInfo.objects.create(
+            username="bob", roll_number="080BCE002", department=self.dept_bce,
+            program=prog_bce, password="x", dob="2000-01-01",
+        )
+        self.app_bct = Application.objects.create(
+            name="alice", email="a@example.com", professor=self.prof, std=self.stu_bct,
+        )
+        self.app_bce = Application.objects.create(
+            name="bob", email="b@example.com", professor=self.prof, std=self.stu_bce,
+        )
+        University.objects.create(
+            uni_name="MIT", country="USA", application=self.app_bct,
+        )
+        University.objects.create(
+            uni_name="TU Delft", country="Netherlands", application=self.app_bce,
+        )
+
+    def base_qs(self):
+        return Application.objects.filter(professor__unique_id="T100")
+
+    def test_empty_params_returns_everything(self):
+        result = apply_application_filters(self.base_qs(), {})
+        self.assertEqual(result.count(), 2)
+
+    def test_blank_values_are_ignored(self):
+        result = apply_application_filters(
+            self.base_qs(), {"department": "", "country": "", "college": ""}
+        )
+        self.assertEqual(result.count(), 2)
+
+    def test_filter_by_department(self):
+        result = apply_application_filters(self.base_qs(), {"department": "BCT"})
+        self.assertEqual([a.pk for a in result], [self.app_bct.pk])
