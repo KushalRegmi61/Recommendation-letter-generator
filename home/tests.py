@@ -2,10 +2,10 @@ import os
 import tempfile
 from datetime import date, datetime
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, SimpleTestCase, override_settings
+from django.test import RequestFactory, TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from home.models import (
@@ -15,6 +15,28 @@ from home.models import (
 )
 from home.filters import apply_application_filters, filter_options
 from home.dashboard import build_teacher_dashboard_context
+
+
+def login_as_teacher(client, teacher, password="test-pw"):
+    """Sign ``client`` in as the Django user behind ``teacher``.
+
+    Creates and links a User if the TeacherInfo does not have one. Replaces the
+    old ``client.cookies["unique"] = ...`` idiom, which no longer authenticates.
+    """
+    user = teacher.user
+    if user is None:
+        user = User.objects.create_user(
+            username=f"user-{teacher.unique_id}", password=password
+        )
+        user.first_name = f"{teacher.name}/{teacher.unique_id}"
+        user.save()
+        teacher.user = user
+        teacher.save(update_fields=["user"])
+    else:
+        user.set_password(password)
+        user.save()
+    client.force_login(user)
+    return user
 
 
 class ModelFieldTests(TestCase):
@@ -2745,3 +2767,91 @@ class TeacherUserLinkTests(TestCase):
         user.delete()
         teacher.refresh_from_db()
         self.assertIsNone(teacher.user)
+
+
+class CurrentTeacherTests(TestCase):
+    """current_teacher resolves the acting professor from the session, not a cookie."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.user = User.objects.create_user(username="ct", password="pw")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof CT", unique_id="T-CT", email="ct@example.com",
+            department=self.dept, user=self.user,
+        )
+        self.factory = RequestFactory()
+
+    def _request(self, user=None, cookies=None):
+        request = self.factory.get("/")
+        request.user = user or AnonymousUser()
+        request.COOKIES.update(cookies or {})
+        return request
+
+    def test_an_authenticated_linked_user_resolves(self):
+        from home.identity import current_teacher
+        self.assertEqual(current_teacher(self._request(self.user)), self.teacher)
+
+    def test_an_anonymous_request_resolves_to_none(self):
+        from home.identity import current_teacher
+        self.assertIsNone(current_teacher(self._request()))
+
+    def test_a_forged_cookie_is_ignored(self):
+        # The whole point of this phase.
+        from home.identity import current_teacher
+        victim_user = User.objects.create_user(username="victim", password="pw")
+        TeacherInfo.objects.create(
+            name="Victim", unique_id="T-VICTIM", email="v@example.com",
+            department=self.dept, user=victim_user,
+        )
+        request = self._request(self.user, {"unique": "T-VICTIM"})
+        self.assertEqual(current_teacher(request), self.teacher)
+
+    def test_a_cookie_alone_grants_nothing(self):
+        from home.identity import current_teacher
+        self.assertIsNone(current_teacher(self._request(None, {"unique": "T-CT"})))
+
+    def test_an_unlinked_teacher_resolves_by_the_name_convention(self):
+        # Legacy rows the data migration could not match keep working.
+        from home.identity import current_teacher
+        legacy_user = User.objects.create_user(username="legacy", password="pw")
+        legacy_user.first_name = "Prof Legacy/T-LEGACY"
+        legacy_user.save()
+        legacy = TeacherInfo.objects.create(
+            name="Prof Legacy", unique_id="T-LEGACY", email="lg@example.com",
+            department=self.dept,
+        )
+        self.assertEqual(current_teacher(self._request(legacy_user)), legacy)
+
+    def test_an_authenticated_non_teacher_resolves_to_none(self):
+        from home.identity import current_teacher
+        plain = User.objects.create_user(username="plain", password="pw")
+        self.assertIsNone(current_teacher(self._request(plain)))
+
+
+class LoginHelperTests(TestCase):
+    """The shared test helper really authenticates."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof LH", unique_id="T-LH", email="lh@example.com",
+            department=self.dept,
+        )
+
+    def test_it_creates_and_links_a_user(self):
+        login_as_teacher(self.client, self.teacher)
+        self.teacher.refresh_from_db()
+        self.assertIsNotNone(self.teacher.user)
+
+    def test_it_reuses_an_existing_user(self):
+        user = User.objects.create_user(username="existing", password="pw")
+        self.teacher.user = user
+        self.teacher.save()
+        self.assertEqual(login_as_teacher(self.client, self.teacher), user)
+
+    def test_the_resolved_teacher_matches(self):
+        from home.identity import current_teacher
+        login_as_teacher(self.client, self.teacher)
+        request = RequestFactory().get("/")
+        request.user = self.teacher.user
+        self.assertEqual(current_teacher(request), self.teacher)
