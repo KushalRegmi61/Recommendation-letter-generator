@@ -144,6 +144,7 @@ from fpdf import FPDF
 from io import BytesIO as bio
 #import fs
 from home.forms import StudentForm
+from home.dashboard import build_teacher_dashboard_context
 
 def text_to_pdf(text,roll, name):
     a4_width_mm = 270
@@ -975,47 +976,9 @@ def loginTeacher(request):
             return response
         user = request.COOKIES.get('username')
         if TeacherInfo.objects.filter(name__exact=user).exists():
-                value = 0
                 unique = request.COOKIES.get('unique')
-
-                teacher_model = TeacherInfo.objects.get(unique_id=unique)
-                generated_dataharu = Application.objects.get(professor__unique_id=unique , is_generated=True)
-
-                dataharu = Application.objects.filter(professor__unique_id=unique)
-                number = len(dataharu)
-                # to check if there is request or not on teachers page
-                for data in dataharu:
-                    if data.is_generated:
-                        value += 1
-                datakolength = len(dataharu)
-                if datakolength == value:
-                    check_value = True
-                else:
-                    check_value = False
-                    # to convert database to json objects
-                std_dataharu = serializers.serialize(
-                    "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-                )
-                non_generated = Application.objects.filter(
-                    is_generated=False, professor__unique_id=unique
-                )
-
-                # determine default custom template for this teacher if any
-                default_template = teacher_model.customtemplates_set.filter(is_default=True).first()
-                response = render(
-                    request,
-                    "Teacher.html",
-                    {
-                        "all_students": generated_dataharu,
-                        "student_list": non_generated,
-                        "check_value": check_value,
-                        "teacher_number": number,
-                        "std_dataharu": std_dataharu,
-                        "teacher_model": teacher_model,
-                        "default_template": default_template,
-                    },
-                )
-                return response
+                context = build_teacher_dashboard_context(unique, request.GET)
+                return render(request, "Teacher.html", context)
         return render(request, "loginTeacher.html")
             
     value = 0
@@ -1715,46 +1678,9 @@ def testing(request):
 
 
 def teacher(request):
-    value=0
-   
     unique = request.COOKIES.get("unique")
-
-    teacher_model = TeacherInfo.objects.get(unique_id=unique)
-    # for loop launlaii 
-    generated_dataharu = Application.objects.filter(professor__unique_id=unique , is_generated=True)
-
-    dataharu = Application.objects.filter(professor__unique_id=unique)
-    number = len(dataharu)
-    # to check if there is request or not on teachers page
-    for data in dataharu:
-        if data.is_generated:
-            value += 1
-    datakolength = len(dataharu)
-    if datakolength == value:
-        check_value = True
-    else:
-        check_value = False
-        # to convert database to json objects
-    std_dataharu = serializers.serialize(
-        "json", Application.objects.filter(professor__unique_id=unique,is_generated=True)
-    )
-    non_generated = Application.objects.filter(
-        is_generated=False, professor__unique_id=unique
-    )
-
-    response = render(
-        request,
-        "Teacher.html",
-        {
-            "all_students": generated_dataharu,
-            "student_list": non_generated,
-            "check_value": check_value,
-            "teacher_number": number,
-            "std_dataharu": std_dataharu,
-            "teacher_model": teacher_model,
-        },
-    )
-    return response
+    context = build_teacher_dashboard_context(unique, request.GET)
+    return render(request, "Teacher.html", context)
 
 
 

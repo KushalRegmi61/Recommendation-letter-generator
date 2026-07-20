@@ -580,3 +580,61 @@ class DashboardContextTests(TestCase):
         self.pending.delete()
         ctx = build_teacher_dashboard_context("T300", {})
         self.assertTrue(ctx["check_value"])
+
+
+class TeacherDashboardViewTests(TestCase):
+    def setUp(self):
+        dept = Department.objects.create(dept_name="BCT")
+        prog = Program.objects.create(program_name="BE-BCT", department=dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="T400", name="Prof Four", email="p4@example.com", department=dept,
+        )
+        stu = StudentLoginInfo.objects.create(
+            username="dan", roll_number="080BCT030", department=dept,
+            program=prog, password="x", dob="2000-01-01",
+        )
+        self.usa_app = Application.objects.create(
+            name="dan usa", email="d@example.com", professor=self.prof,
+            std=stu, is_generated=False,
+        )
+        self.fin_app = Application.objects.create(
+            name="dan finland", email="d@example.com", professor=self.prof,
+            std=stu, is_generated=False,
+        )
+        University.objects.create(
+            uni_name="MIT", country="USA", application=self.usa_app,
+        )
+        University.objects.create(
+            uni_name="Aalto", country="Finland", application=self.fin_app,
+        )
+        self.client.cookies["unique"] = "T400"
+        self.client.cookies["username"] = "Prof Four"
+
+    def test_teacher_view_renders_all_applications_by_default(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "dan usa")
+        self.assertContains(response, "dan finland")
+
+    def test_teacher_view_applies_country_filter(self):
+        response = self.client.get("/teacher", {"country": "USA"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "dan usa")
+        self.assertNotContains(response, "dan finland")
+
+    def test_teacher_view_exposes_filter_options(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["filter_options"]["countries"],
+                         ["Finland", "USA"])
+
+    def test_login_teacher_get_does_not_crash_without_generated_letters(self):
+        # Regression: loginTeacher used Application.objects.get(is_generated=True),
+        # which raised DoesNotExist for a professor with no generated letters.
+        response = self.client.get("/loginTeacher")
+        self.assertEqual(response.status_code, 200)
+
+    def test_login_teacher_get_does_not_crash_with_two_generated_letters(self):
+        # Regression: the same .get() raised MultipleObjectsReturned.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/loginTeacher")
+        self.assertEqual(response.status_code, 200)
