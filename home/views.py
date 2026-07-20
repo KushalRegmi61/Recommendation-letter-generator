@@ -19,6 +19,7 @@ from .models import *
 from .forms import TeacherInfoForm
 from django.contrib import messages
 import random
+import uuid
 import json
 from collections import OrderedDict
 
@@ -1630,7 +1631,12 @@ def getTemplate(request):
 
     teacher = TeacherInfo.objects.get(unique_id=unique)
     content = request.POST.get("content") or ""
-    name = request.POST.get("templateName")
+    name = (request.POST.get("templateName") or "").strip()
+    if not name:
+        # Without this the field arrives as None and creates a nameless row that
+        # no dropdown can offer back to the professor.
+        messages.error(request, "A template needs a name.")
+        return redirect("/makeTemplate")
     make_default = request.POST.get("is_default") == 'on'
     # legacy: if template is named "Default" treat as default
     if name and name.strip().lower() == 'default':
@@ -1671,7 +1677,6 @@ def getTemplate(request):
     })
 
 
-@csrf_exempt
 def duplicate_template(request):
     """Copy a system (or own) template into this professor's editable library (FR-3)."""
     if request.method != "POST":
@@ -1692,12 +1697,34 @@ def duplicate_template(request):
         CustomTemplates.objects.filter(visible_to(teacher)), pk=template_id
     )
 
-    base_name = f"{source.template_name} (copy)"
+    # Names are bounded by the column width. Duplicating a copy of a copy grows
+    # the name by len(" (copy)") each time, so an unbounded f-string overflows
+    # ``max_length`` after a dozen clicks - silently on SQLite, as a DataError
+    # (and a DEBUG traceback) on PostgreSQL.
+    max_len = CustomTemplates._meta.get_field("template_name").max_length
+    marker = " (copy)"
+    base_name = f"{(source.template_name or 'Template')[:max_len - len(marker)]}{marker}"
+
+    def taken(candidate):
+        return CustomTemplates.objects.filter(
+            professor=teacher, template_name=candidate
+        ).exists()
+
     name = base_name
     suffix = 2
-    while CustomTemplates.objects.filter(professor=teacher, template_name=name).exists():
-        name = f"{base_name} {suffix}"
+    # The numeric tail is appended *after* trimming the base to make room for
+    # it, never by truncating the finished candidate: truncating the candidate
+    # would map every suffix onto the same 100-char string once the base is
+    # already at the cap, and the loop would never terminate.
+    while taken(name) and suffix <= 999:
+        tail = f" {suffix}"
+        name = f"{base_name[:max_len - len(tail)]}{tail}"
         suffix += 1
+    if taken(name):
+        # 999 collisions on one base name is not a real workflow; fall back to a
+        # token rather than spinning or overwriting.
+        tail = f" {uuid.uuid4().hex[:8]}"
+        name = f"{base_name[:max_len - len(tail)]}{tail}"
 
     CustomTemplates.objects.create(
         template_name=name,
@@ -1824,8 +1851,6 @@ def adminDashboard(request):
     })
 from .forms import TeacherInfoForm
 from django.contrib.auth.models import User
-from django.views.decorators.csrf import csrf_exempt
-from django.http import HttpResponse
 from docx import Document
 from jinja2 import Template
 import datetime

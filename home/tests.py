@@ -2153,6 +2153,44 @@ class DuplicateTemplateTests(TestCase):
         copy = CustomTemplates.objects.get(professor=self.teacher)
         self.assertEqual(select_template(self.teacher, copy.pk), copy)
 
+    def test_a_long_name_does_not_overflow_the_column(self):
+        long_name = "L" * 95
+        source = CustomTemplates.objects.create(
+            template_name=long_name, template="body", professor=self.teacher
+        )
+        self.client.post("/duplicateTemplate", {"template_id": source.pk})
+        copy = CustomTemplates.objects.exclude(pk=source.pk).get(professor=self.teacher)
+        self.assertLessEqual(len(copy.template_name), 100)
+        copy.full_clean()  # would raise if the column width were exceeded
+
+    def test_repeatedly_duplicating_a_copy_stays_within_the_column(self):
+        # Each generation appends " (copy)"; without a bound this overflows.
+        current = CustomTemplates.objects.create(
+            template_name="T" * 80, template="body", professor=self.teacher
+        )
+        for _ in range(15):
+            self.client.post("/duplicateTemplate", {"template_id": current.pk})
+            current = CustomTemplates.objects.filter(
+                professor=self.teacher
+            ).order_by("-pk").first()
+            self.assertLessEqual(len(current.template_name), 100)
+            current.full_clean()
+
+    def test_many_duplicates_of_a_capped_name_all_get_distinct_names(self):
+        # A name already at the cap: naive truncation of the finished candidate
+        # would map every suffix onto one string and spin forever.
+        source = CustomTemplates.objects.create(
+            template_name="C" * 100, template="body", professor=self.teacher
+        )
+        for _ in range(5):
+            self.client.post("/duplicateTemplate", {"template_id": source.pk})
+        copies = CustomTemplates.objects.filter(professor=self.teacher).exclude(pk=source.pk)
+        names = list(copies.values_list("template_name", flat=True))
+        self.assertEqual(len(names), 5)
+        self.assertEqual(len(set(names)), 5)
+        for candidate in names:
+            self.assertLessEqual(len(candidate), 100)
+
 
 class TemplateEditorViewTests(TestCase):
     """The editor lists system templates alongside the professor's own (FR-3)."""
@@ -2290,3 +2328,15 @@ class GetTemplateOwnershipTests(TestCase):
     def test_a_get_request_redirects_to_the_editor(self):
         response = self.client.get("/getTemplate")
         self.assertEqual(response.status_code, 302)
+
+    def test_a_template_with_no_name_is_rejected(self):
+        response = self.client.post("/getTemplate", {"content": "x", "uid": "T-M"})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())
+
+    def test_a_blank_name_is_rejected(self):
+        response = self.client.post("/getTemplate", {
+            "content": "x", "templateName": "   ", "uid": "T-M",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(CustomTemplates.objects.filter(professor=self.teacher).exists())

@@ -220,6 +220,7 @@ Good Luck!
     <p>Copy one into your own templates, then edit it however you like.</p>
     {% for sys_tpl in system_templates %}
     <form method="post" action="/duplicateTemplate" style="display:inline-block; margin:4px;">
+      {% csrf_token %}
       <input type="hidden" name="template_id" value="{{ sys_tpl.pk }}">
       <button type="submit" class="btn btn-secondary">
         Duplicate "{{ sys_tpl.template_name }}"
@@ -231,6 +232,7 @@ Good Luck!
   </div>
 
   <form action="/getTemplate" method="post">
+    {% csrf_token %}
     <div class="user-details">
       <!-- if there are existing templates, allow selection for editing -->
       {% if templates and templates.count > 0 %}
@@ -268,10 +270,6 @@ Good Luck!
     <div>
       <label><input type="checkbox" name="is_default" id="is_default" /> Make this my default template</label>
     </div>
-
-    <!-- Not load-bearing: /getTemplate takes the owner from the `unique` cookie
-         and ignores this field. Kept only so older bookmarked forms still post. -->
-    <input type="hidden" value="{{professor.unique_id}}" name="uid" readonly />
 
     <div class="button-container">
       <div class="button">
