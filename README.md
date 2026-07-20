@@ -157,7 +157,7 @@ Log in to the admin panel (`/admin/`) and create the reference data the app need
 ## Running tests
 
 ```bash
-python manage.py test home                          # run the app's test suite (249 tests)
+python manage.py test home                          # run the app's test suite (342 tests)
 python manage.py test home.tests.ModelFieldTests    # a single test class
 ```
 
@@ -177,6 +177,36 @@ SMTP authentication error, generate a Gmail **App Password** for a valid account
 > to environment variables before deploying anywhere public.
 
 ---
+
+## Deployment
+
+Configuration comes from the environment. Copy `.env.example` to `.env` for local development;
+in production set real environment variables rather than shipping a `.env` file.
+
+| Variable | Required in production | Notes |
+|---|---|---|
+| `DJANGO_SECRET_KEY` | **yes** | The app refuses to start with the dev default when `DJANGO_DEBUG=false`. |
+| `DJANGO_DEBUG` | **yes** (`false`) | Defaults to `true` so a fresh clone runs. |
+| `DJANGO_ALLOWED_HOSTS` | **yes** | Comma-separated. `*` is rejected when `DEBUG` is off. |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | yes, if behind a proxy | Comma-separated, scheme included. |
+| `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | for OTP and notification mail | A Gmail **app password**, not the account password. |
+
+Before deploying:
+
+```bash
+DJANGO_DEBUG=false DJANGO_SECRET_KEY=... DJANGO_ALLOWED_HOSTS=your.host \
+  python manage.py check --deploy
+```
+
+> **The credentials previously committed to this repository are compromised and must be rotated.**
+> The old `SECRET_KEY` and the Gmail app password are in the git history and cannot be removed by
+> deleting them from the current files. Generate a new secret key, revoke the old Gmail app
+> password and issue a new one. Note that rotating `SECRET_KEY` invalidates every active session
+> **and every signed student cookie**, so all users are logged out on that deploy.
+
+> **Still not addressed:** the database is SQLite committed to the repository, which is unsuitable
+> for concurrent production use. `dj_database_url` is already imported in `auth/settings.py` with a
+> commented-out Postgres block; switching is separate work.
 
 ## Project layout
 
