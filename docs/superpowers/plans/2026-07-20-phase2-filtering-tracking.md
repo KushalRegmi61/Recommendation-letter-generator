@@ -903,6 +903,22 @@ Add these methods to `TeacherDashboardViewTests`:
         response = self.client.get("/teacher")
         self.assertContains(response, "Generated on")
         self.assertContains(response, "Template")
+
+    def test_empty_state_distinguishes_no_requests_from_no_matches(self):
+        # No filter and nothing pending -> the cheerful global message.
+        Application.objects.filter(professor=self.prof).update(is_generated=True)
+        response = self.client.get("/teacher")
+        self.assertContains(response, "You have no request for now")
+
+        # A filter that matches nothing must NOT claim there are no requests at all.
+        Application.objects.filter(professor=self.prof).update(is_generated=False)
+        response = self.client.get("/teacher", {"country": "Antarctica"})
+        self.assertContains(response, "No pending requests match")
+        self.assertNotContains(response, "You have no request for now")
+
+    def test_generated_count_is_shown(self):
+        response = self.client.get("/teacher")
+        self.assertEqual(response.context["generated_count"], 0)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -969,6 +985,25 @@ Expected: FAIL — the three new tests fail because `Teacher.html` contains no f
 
 Note the `<option>` tags inside a `<datalist>` are value-only and self-closing in practice — no text content and no `</option>`, which is what the tests assert.
 
+**3a-bis.** Fix the now-misleading empty state. `check_value` reflects the *filtered* pending
+list, so with a filter active it can be `True` while the professor still has pending requests
+that simply don't match. The existing copy would then wrongly read "you have no request for
+now". Replace the existing line:
+
+```html
+  <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
+```
+
+with:
+
+```html
+  {% if filters_active %}
+  <h5 style="text-align:center">No pending requests match your search or filter. <a href="/teacher">Show all</a></h5>
+  {% else %}
+  <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
+  {% endif %}
+```
+
 **3b.** Replace the header row of the generated table (currently lines 43–47, the `<tr>` holding `Name` / `Email` / `Letter`) with:
 
 ```html
@@ -994,13 +1029,25 @@ Note the `<option>` tags inside a `<datalist>` are value-only and self-closing i
 
 The em-dash fallbacks matter: every existing row has `generated_at=NULL` until Phase 3 starts stamping it.
 
+**3c-bis.** Surface `generated_count` so it isn't dead context. Change the heading:
+
+```html
+  <h1>Students You Have Recommended:</h1>
+```
+
+to:
+
+```html
+  <h1>Students You Have Recommended ({{ generated_count }}):</h1>
+```
+
 **3d.** The generated row's `</tr>` is currently missing (the loop closes with `{% endfor %}` right after the `</td>`). Add `</tr>` immediately before `{% endfor %}` so the new columns line up.
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python manage.py test home.tests.TeacherDashboardViewTests -v 2`
 
-Expected: PASS (10 tests).
+Expected: PASS (12 tests).
 
 - [ ] **Step 5: Commit**
 
