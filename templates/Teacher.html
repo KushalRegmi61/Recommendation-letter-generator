@@ -1,248 +1,196 @@
 {% extends 'base2.html' %}
 
-{% block title %}Requests{% endblock title %}
-{% block teacher %}{% if teacher_model.images %}<a href="teacher"><img src="{{ teacher_model.images.url }}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
+{% block title %}Dashboard{% endblock title %}
+{% block teacher %}{% if teacher_model.images %}<a href="teacher"><img src="{{ teacher_model.images.url }}" style="width:33px;height:33px; border-radius: 50%;"></a>{% endif %}{% endblock teacher %}
 
 {% block body %}
-<div class="container-fluid d-flex justify-content-center align-items-center gap-2" style="margin: 16px 0;">
-  <a href="/makeTemplate" class="btn btn-primary">Manage Templates</a>
-  <button type="button" class="btn btn-outline-primary" title="Refresh" aria-label="Refresh"
-          onClick="window.location.reload()"><i class="bi bi-arrow-clockwise"></i></button>
-</div>
+<style>
+  .dash { max-width: 1120px; margin: 0 auto; padding: 8px 16px 72px; }
 
-<div class="container-fluid">
-  <p class="text-center text-muted mb-2" style="font-weight:500;">
-    Filter students: applies to both pending requests and recommended candidates
-  </p>
-  <form method="get" action="/teacher" class="row g-2 align-items-end mb-4">
-    <div class="col-auto">
-      <label for="filter-q" class="form-label">Search student</label>
-      <input class="form-control" id="filter-q" type="search" name="q"
-             placeholder="Name, roll number or email"
-             value="{{ active_filters.q }}">
-    </div>
-    <div class="col-auto">
-      <label for="filter-department" class="form-label">Department</label>
-      <input class="form-control" id="filter-department" name="department"
-             list="department-options" placeholder="All departments"
-             value="{{ active_filters.department }}">
-      <datalist id="department-options">
-        {% for option in filter_options.departments %}
-        <option value="{{ option }}">
-        {% endfor %}
-      </datalist>
-    </div>
-    <div class="col-auto">
-      <label for="filter-country" class="form-label">Country</label>
-      <input class="form-control" id="filter-country" name="country"
-             list="country-options" placeholder="All countries"
-             value="{{ active_filters.country }}">
-      <datalist id="country-options">
-        {% for option in filter_options.countries %}
-        <option value="{{ option }}">
-        {% endfor %}
-      </datalist>
-    </div>
-    <div class="col-auto">
-      <label for="filter-college" class="form-label">College / University</label>
-      <input class="form-control" id="filter-college" name="college"
-             list="college-options" placeholder="All colleges"
-             value="{{ active_filters.college }}">
-      <datalist id="college-options">
-        {% for option in filter_options.colleges %}
-        <option value="{{ option }}">
-        {% endfor %}
-      </datalist>
-    </div>
-    <div class="col-auto">
-      <button class="btn btn-primary" type="submit">Filter</button>
-      {% if filters_active %}
-      <a class="btn btn-secondary" href="/teacher">Clear</a>
-      {% endif %}
-    </div>
-  </form>
-  {% if check_value %}
+  .dash-toolbar { display: flex; justify-content: flex-end; align-items: center;
+    gap: 8px; margin: 16px 0 8px; }
 
-  {% if filters_active %}
-  <h5 style="text-align:center">No pending requests match your search or filter. <a href="/teacher">Show all</a></h5>
-  {% else %}
-  <h5 style="text-align:center">Yeah! You have no request for now from students.</h5>
-  {% endif %}
-  {% else %}
-  {% for student in student_list %}
-  <div class="alert alert-success" role="alert">
-    <h4 class="alert-heading">{{ student.name }}</h4>
-    <p>This person has requested you for the recommendation letter.</p>
-    <hr>
-    <form action='/makeLetter' method='POST' target="_blank">
-      {% csrf_token %}
-      <div class="container-login100-form-btn">
-        <button class="login100-form-btn" type='submit' value="{{ student.std.roll_number }}" name="roll">
-          CREATE
-        </button>
+  .dash-section { margin-top: 40px; }
+  .dash-section-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .dash-section-head h2 { font-size: 1.3rem; font-weight: 600; margin: 0; }
+  .dash-count { font-size: .8rem; font-weight: 600; background: #eef1fb; color: #33429e;
+    padding: 2px 11px; border-radius: 999px; line-height: 1.6; }
+
+  .surface { border: 1px solid #e6e7ea; border-radius: 12px; background: #fff;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+
+  .filter-card { padding: 18px 18px 14px; }
+  .filter-lead { font-weight: 500; color: #667085; margin-bottom: 14px; font-size: .9rem; }
+
+  .request-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; }
+  .request-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .request-card .name { font-size: 1.05rem; font-weight: 600; margin: 0; }
+  .request-card .desc { color: #667085; font-size: .85rem; margin: 0 0 6px; }
+  .request-card form { margin-top: auto; }
+
+  .empty-state { text-align: center; color: #667085; background: #f7f8fa;
+    border: 1px dashed #d7dae0; border-radius: 12px; padding: 26px 16px; }
+  .empty-state a { font-weight: 500; }
+
+  .table-wrap { padding: 6px; overflow-x: auto; }
+  .table-wrap table { margin: 0; }
+  .table-wrap thead th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+    color: #667085; border-bottom: 2px solid #eaecf0; white-space: nowrap; }
+  .table-wrap td { vertical-align: middle; }
+  .action-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+</style>
+
+<div class="dash">
+
+  <div class="dash-toolbar">
+    <a href="/makeTemplate" class="btn btn-primary"><i class="bi bi-file-earmark-text"></i> Manage Templates</a>
+    <button type="button" class="btn btn-outline-primary" title="Refresh" aria-label="Refresh"
+            onClick="window.location.reload()"><i class="bi bi-arrow-clockwise"></i></button>
+  </div>
+
+  <!-- Filter (applies to both lists) -->
+  <div class="surface filter-card">
+    <p class="filter-lead">Filter students: applies to both pending requests and recommended candidates</p>
+    <form method="get" action="/teacher" class="row g-2 align-items-end">
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-q" class="form-label">Search student</label>
+        <input class="form-control" id="filter-q" type="search" name="q"
+               placeholder="Name, roll number or email"
+               value="{{ active_filters.q }}">
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-department" class="form-label">Department</label>
+        <input class="form-control" id="filter-department" name="department"
+               list="department-options" placeholder="All departments"
+               value="{{ active_filters.department }}">
+        <datalist id="department-options">
+          {% for option in filter_options.departments %}
+          <option value="{{ option }}">
+          {% endfor %}
+        </datalist>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-country" class="form-label">Country</label>
+        <input class="form-control" id="filter-country" name="country"
+               list="country-options" placeholder="All countries"
+               value="{{ active_filters.country }}">
+        <datalist id="country-options">
+          {% for option in filter_options.countries %}
+          <option value="{{ option }}">
+          {% endfor %}
+        </datalist>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-college" class="form-label">College / University</label>
+        <input class="form-control" id="filter-college" name="college"
+               list="college-options" placeholder="All colleges"
+               value="{{ active_filters.college }}">
+        <datalist id="college-options">
+          {% for option in filter_options.colleges %}
+          <option value="{{ option }}">
+          {% endfor %}
+        </datalist>
+      </div>
+      <div class="col-12 mt-3">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-funnel"></i> Filter</button>
+        {% if filters_active %}
+        <a class="btn btn-outline-secondary" href="/teacher">Clear</a>
+        {% endif %}
       </div>
     </form>
   </div>
-  {% endfor %}
-  {% endif %}
-  <br>
-  <br>
-  <br>
-  <h1>Students You Have Recommended ({{ generated_count }}):</h1>
-  <div class="container-login100-form-btn">
-    <button class="login100-form-btn navbar-toggler" id="btn" data-bs-toggle="collapse" data-bs-target="#navbarNav3" aria-controls="navbarNav3" aria-expanded="false" aria-label="Toggle navigation" target="blank" type='submit' value="{{ roll }}" name="roll" style="margin-bottom:30px;">
-      View
-    </button>
-  </div>
 
-  <div class="collapse navbar-collapse" id="navbarNav3">
-    <table id="table">
-      <tbody>
-        <tr>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Generated on</th>
-          <th>Template</th>
-          <th>Letter</th>
-        </tr>
-        {% for item in all_students %}
-        <tr>
-          <td class="fs-5">{{ item.name }}</td>
-          <td class="fs-5">{{ item.email }}</td>
-          <td class="fs-5">
-            {% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}—{% endif %}
-          </td>
-          <td class="fs-5">
-            {% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}—{% endif %}
-          </td>
-          <td>
-            <form action='/studentfinal' method='POST'>
-              {% csrf_token %}
-              <button class="btn btn-primary" type='submit' value="pdf" name="id">
-                View pdf
-              </button>
+  <!-- Pending requests -->
+  <section class="dash-section">
+    <div class="dash-section-head">
+      <h2>Pending Requests</h2>
+      {% if not check_value %}<span class="dash-count">{{ student_list|length }}</span>{% endif %}
+    </div>
 
-              <button class="btn btn-primary" type='submit' value="docs" name="id">
-                Download docx
-              </button>
+    {% if check_value %}
+      {% if filters_active %}
+      <div class="empty-state">No pending requests match your search or filter. <a href="/teacher">Show all</a></div>
+      {% else %}
+      <div class="empty-state">Yeah! You have no request for now from students.</div>
+      {% endif %}
+    {% else %}
+    <div class="request-grid">
+      {% for student in student_list %}
+      <div class="surface request-card">
+        <p class="name">{{ student.name }}</p>
+        <p class="desc">Requested a recommendation letter.</p>
+        <form action='/makeLetter' method='POST' target="_blank">
+          {% csrf_token %}
+          <button class="btn btn-success w-100" type='submit'
+                  value="{{ student.std.roll_number }}" name="roll">
+            <i class="bi bi-pencil-square"></i> Create letter
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
 
-              <input type = 'hidden' value="{{ item.std.roll_number }}" name="roll">
-              <input type= "hidden" value="{{ item.professor.name }}" name="prof_name">
-            </form>
-            {% if item.generated_letter %}
-            <a class="btn btn-secondary" href="/download_generated/?id={{ item.id }}">Re-download</a>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <!-- Recommended students -->
+  <section class="dash-section">
+    <div class="dash-section-head">
+      <h2>Students You Have Recommended</h2>
+      <span class="dash-count">{{ generated_count }}</span>
+    </div>
+
+    <div class="surface table-wrap">
+      <table class="table table-striped table-hover align-middle">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Generated on</th>
+            <th>Template</th>
+            <th>Letter</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in all_students %}
+          <tr>
+            <td>{{ item.name }}</td>
+            <td>{{ item.email }}</td>
+            <td>{% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}—{% endif %}</td>
+            <td>{% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}—{% endif %}</td>
+            <td>
+              <div class="action-row">
+                <form action='/studentfinal' method='POST' class="action-row">
+                  {% csrf_token %}
+                  <button class="btn btn-sm btn-primary" type='submit' value="pdf" name="id">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF
+                  </button>
+                  <button class="btn btn-sm btn-outline-primary" type='submit' value="docs" name="id">
+                    <i class="bi bi-file-earmark-word"></i> DOCX
+                  </button>
+                  <input type='hidden' value="{{ item.std.roll_number }}" name="roll">
+                  <input type="hidden" value="{{ item.professor.name }}" name="prof_name">
+                </form>
+                {% if item.generated_letter %}
+                <a class="btn btn-sm btn-outline-secondary" href="/download_generated/?id={{ item.id }}">
+                  <i class="bi bi-download"></i> Re-download
+                </a>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="5">
+              <div class="empty-state" style="border:none; background:transparent; padding:22px 8px;">
+                You haven't generated any recommendation letters yet.
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
 </div>
-
-<script>
-//table heading
-  var pagecounter = 1;
-  var heading_id = document.getElementById("id");
-  var heading_nameharu = document.getElementById("col-stdname");
-  var heading_email = document.getElementById("col-email");
-  // var heading_universityharu = document.getElementById("col-university");
-
-//parsing models as JSON data
-  var students = JSON.parse('{{ std_dataharu | safe }}');
-  n=students.length;
-
-//calling ID
-  var button = document.getElementById("btn");
-  var tablee = document.getElementById("table")
-
-
-//making array to store harek table row ko table column values
-var tr_no=[];
-var id_no=[];
-var nameharu=[];
-// var universityharu=[];
-var email=[];
-
-
-//table data
-for (let i=0; i<n; i++) {
- 
-var table = document.getElementsByTagName("table")[0];
-  tr_no[i]= table.rows[i+1];
- id_no[i]= tr_no[i].cells[0];
- nameharu[i]= tr_no[i].cells[1];
-//  universityharu[i]= tr_no[i].cells[2];
- email[i]= tr_no[i].cells[2];
-
-
-
-
-}
-
-function loadAjax(){
-   var ourRequest = new XMLHttpRequest();
-
-    //after GET mentioning the location where ajax is to be used
-    ourRequest.open("GET", "http://127.0.0.1:8000/loginTeacher", true);
-    ourRequest.onload = function  () {
-
-      heading_id.innerHTML = '#'
-      heading_nameharu.innerHTML = 'Name'
-      // heading_universityharu.innerHTML = 'University'
-      heading_email.innerHTML = 'Email'
-
-      for (var i = 0; i < students.length; i++) {
-
-      
-        id_no[i].innerHTML+=i + 1 + "<br>";
-        nameharu[i].innerHTML+=students[i].fields.name + "<br>";
-        // universityharu[i].innerHTML += students[i].fields.uni + "<br>";
-        email[i].innerHTML += students[i].fields.email + "<br>";
-
-
-      }
-
-
-    };
-    ourRequest.send();
-
-}
-
-
-//counts the click
-clickCounter=0;
-  // adding event of button 
-
-  //to show and hide the table on consecutive click
-  
-  button.addEventListener("click", function () {
-    
-  
-    if(clickCounter==0){
-
-    tablee.classList.add("table","table-striped","table-hover") 
-
-    loadAjax();
-    }
-    
-    
-    else if(clickCounter%2!=0){
-    tablee.classList.add("hide-table") 
-    console.log("click")
-    }
-
-  //this is to show only table without loading ajax again
-    else{
-      tablee.classList.remove("hide-table") 
-    tablee.classList.add("table","table-striped","table-hover") 
-    }
-
-    clickCounter+=1;
-    
-  });
-
-
-
-</script>
 {% endblock body %}
