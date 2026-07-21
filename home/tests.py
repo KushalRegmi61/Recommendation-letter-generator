@@ -3916,3 +3916,28 @@ class MakeTemplatePageTests(TestCase):
     def test_palette_uses_real_context_variable(self):
         resp = self.client.get("/makeTemplate")
         self.assertContains(resp, "app.name")
+
+
+class DashboardLayoutTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof L", unique_id="T-L", email="l@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_dashboard_links_to_template_page(self):
+        resp = self.client.get("/teacher")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "/makeTemplate")
+
+    def test_dashboard_drops_inline_default_template_heading(self):
+        CustomTemplates.objects.create(
+            template_name="My Default", professor=self.teacher, is_default=True,
+        )
+        resp = self.client.get("/teacher")
+        self.assertNotContains(resp, "Current default template:")
+
+    def test_dashboard_shows_recommended_section(self):
+        resp = self.client.get("/teacher")
+        self.assertContains(resp, "Students You Have Recommended")

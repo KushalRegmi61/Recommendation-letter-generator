@@ -6,6 +6,10 @@
 {% block body %}
 <h1 style="text-align:center"><br><u> Requests:</u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button class="btn btn-primary" onClick="window.location.reload()">Refresh</button></h1>
 
+<div class="container-fluid" style="text-align:center; margin: 8px 0 20px;">
+  <a href="/makeTemplate" class="btn btn-primary">Manage Templates</a>
+</div>
+
 <div class="container-fluid">
   <form method="get" action="/teacher" class="row g-2 align-items-end mb-4">
     <div class="col-auto">
@@ -133,16 +137,6 @@
   </div>
 </div>
 
-<!-- Create Template Button -->
-<div class="container-fluid mt-4">
-  {% comment %} display current default template if exists (provided by view) {% endcomment %}
-  {% if default_template %}
-  <h4>Current default template: <em>{{ default_template.template_name }}</em></h4>
-  {% else %}
-  <h4>No default template yet. Duplicate a starter template to get going.</h4>
-  {% endif %}
-  <h2>Manage Templates:</h2>
-  <a href="/makeTemplate" class="btn btn-primary">Create / Edit Templates</a>
 <script>
 //table heading
   var pagecounter = 1;
