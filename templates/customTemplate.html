@@ -32,34 +32,27 @@ Good Luck!
    
 
       const placeholderItems = [
-          { text: "Quality Recommend", value: "{{ '{{' }} quality.recommend }}" },
-          { text: "Student Name", value: "{{ '{{' }} student.name }}" },
-          { text: "First Name", value: "{{ '{{' }} firstname }}" },
-          { text: "Years Taught", value: "{{ '{{' }} student.years_taught }}" },
-          { text: "Program", value: "{{ '{{' }} student.std.program }}" },
-          { text: "Is Pro", value: "{{ '{{' }} student.is_pro }}" },
-          { text: "Value", value: "{{ '{{' }} value }}" },
-          { text: "Subject", value: "{{ '{{' }} subject }}" },
-          { text: "Quality", value: "{{ '{{' }} quality.quality }}" },
-          { text: "Tentative Ranking", value: "{{ '{{' }} academics.tentative_ranking }}" },
-          { text: "Final Project", value: "{{ '{{' }} project.final_project }}" },
-          { text: "Is Paper", value: "{{ '{{' }} student.is_paper }}" },
-          { text: "Paper Title", value: "{{ '{{' }} paper.paper_title }}" },
-          { text: "Presentation", value: "{{ '{{' }} quality.presentation }}" },
-          { text: "Leadership", value: "{{ '{{' }} quality.leadership }}" },
-          { text: "Teamwork", value: "{{ '{{' }} quality.teamwork }}" },
-          { text: "Hardworking", value: "{{ '{{' }} quality.hardworking }}" },
-          { text: "Friendly", value: "{{ '{{' }} quality.friendly }}" },
-          { text: "Social", value: "{{ '{{' }} quality.social }}" },
-          { text: "ECA", value: "{{ '{{' }} quality.eca }}" },
-          { text: "Deployed", value: "{{ '{{' }} project.deployed }}" },
-          { text: "Intern", value: "{{ '{{' }} student.intern }}" },
-          { text: "Professor Name", value: "{{ '{{' }} student.professor.name }}" },
-          { text: "Professor Title", value: "{{ '{{' }} student.professor.title }}" },
-          { text: "Professor Department", value: "{{ '{{' }} student.professor.department }}" },
-          { text: "Professor Phone", value: "{{ '{{' }} student.professor.phone }}" },
-          { text: "Professor Email", value: "{{ '{{' }} student.professor.email }}" },
-        ];
+        { text: "Student Name", value: "{{ '{{' }} app.name }}" },
+        { text: "First Name", value: "{{ '{{' }} firstname }}" },
+        { text: "Program", value: "{{ '{{' }} app.std.program.program_name }}" },
+        { text: "Department", value: "{{ '{{' }} app.std.department.dept_name }}" },
+        { text: "Ranking Percentile", value: "{{ '{{' }} app.ranking_percentile }}" },
+        { text: "Relationship", value: "{{ '{{' }} rel_desc }}" },
+        { text: "Subjects Sentence", value: "{{ '{{' }} subjects_sentence }}" },
+        { text: "Subject", value: "{{ '{{' }} subject }}" },
+        { text: "GPA", value: "{{ '{{' }} academics.gpa }}" },
+        { text: "Standout Quality", value: "{{ '{{' }} quality.quality }}" },
+        { text: "Recommendation Strength", value: "{{ '{{' }} strength_phrase }}" },
+        { text: "Teacher Name", value: "{{ '{{' }} teacher.name }}" },
+        { text: "Teacher Email", value: "{{ '{{' }} teacher.email }}" },
+        { text: "Teacher Title", value: "{{ '{{' }} teacher.title }}" },
+        { text: "Teacher Phone", value: "{{ '{{' }} teacher.phone }}" },
+        { text: "Pronoun (he/she)", value: "{{ '{{' }} pronoun }}" },
+        { text: "Pronoun (him/her)", value: "{{ '{{' }} pronoun_obj }}" },
+        { text: "Pronoun (his/her)", value: "{{ '{{' }} pronoun_pos }}" },
+        { text: "Today's Date", value: "{{ '{{' }} today }}" },
+        { text: "Deadline", value: "{{ '{{' }} deadline }}" },
+      ];
 
 
       // Add a custom button for if-else conditions
@@ -192,25 +185,6 @@ Good Luck!
     },
   });
 
-  // when an existing template is selected, load its content and name into form
-  document.addEventListener('DOMContentLoaded', function() {
-    var select = document.getElementById('existing_templates');
-    if (select) {
-      select.addEventListener('change', function() {
-        var option = this.options[this.selectedIndex];
-        if (option && option.value) {
-          document.getElementById('templateName').value = option.getAttribute('data-name');
-          tinymce.get('editor').setContent(option.getAttribute('data-content'));
-          var isDefault = option.getAttribute('data-default') === 'True';
-          document.getElementById('is_default').checked = isDefault;
-        } else {
-          document.getElementById('templateName').value = '';
-          tinymce.get('editor').setContent('');
-          document.getElementById('is_default').checked = false;
-        }
-      });
-    }
-  });
 </script>
 {% endblock raw %} {% block body %}
 <div class="center-content">
@@ -231,30 +205,37 @@ Good Luck!
     {% endfor %}
   </div>
 
+  <!-- if there are existing templates, show them as an editable list (kept
+       OUTSIDE the getTemplate form so the setDefault/delete forms are not nested) -->
+  {% if templates and templates.count > 0 %}
+  <div class="my-templates" style="text-align:left; margin: 12px 0 20px;">
+    <span class="details">Your templates:</span>
+    <ul style="list-style:none; padding:0; margin:8px 0;">
+      {% for tmp in templates %}
+      <li style="display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid #e4e3dc; border-radius:8px; margin-bottom:6px;">
+        <strong style="flex:1">{{ tmp.template_name }}{% if tmp.is_default %} <em style="color:#2f9e44">(default)</em>{% endif %}</strong>
+        <button type="button" class="btn btn-secondary" onclick="loadTemplateIntoEditor({{ tmp.pk }})">Edit</button>
+        <form action="/setDefaultTemplate" method="post" style="display:inline">
+          {% csrf_token %}
+          <input type="hidden" name="template_id" value="{{ tmp.pk }}">
+          <button type="submit" class="btn btn-secondary">Set default</button>
+        </form>
+        <form action="/deleteTemplate" method="post" style="display:inline"
+              onsubmit="return confirm('Delete this template?');">
+          {% csrf_token %}
+          <input type="hidden" name="template_id" value="{{ tmp.pk }}">
+          <button type="submit" class="btn btn-secondary">Delete</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <form action="/getTemplate" method="post">
     {% csrf_token %}
+      <input type="hidden" name="template_id" id="templateId" value="{{ template.pk|default:'' }}">
     <div class="user-details">
-      <!-- if there are existing templates, allow selection for editing -->
-      {% if templates and templates.count > 0 %}
-      <div class="input-box">
-        <span class="details">Existing Templates:</span>
-        <select id="existing_templates" name="existing_template">
-          <option value="">-- new template --</option>
-          {% for tmp in templates %}
-            <!-- No |escapejs here: these are HTML attributes read back with
-                 getAttribute(), not JS string literals. escapejs would emit
-                 literal
- / ' text that the browser never decodes,
-                 corrupting the body on load. Autoescaping is the correct
-                 encoding for an attribute and round-trips cleanly. -->
-            <option value="{{ tmp.pk }}" data-content="{{ tmp.template }}" data-name="{{ tmp.template_name }}" data-default="{{ tmp.is_default }}">
-              {{ tmp.template_name }}{% if tmp.is_default %} (default){% endif %}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-      {% endif %}
-
       <div class="input-box">
         <br />
         <br />
@@ -284,6 +265,30 @@ Good Luck!
     </div>
   </form>
 </div>
+
+<div id="tpl-store" style="display:none">
+  {% for tmp in templates %}
+  <input type="hidden" class="tpl-row"
+         data-id="{{ tmp.pk }}"
+         data-name="{{ tmp.template_name }}"
+         data-content="{{ tmp.template }}"
+         data-default="{{ tmp.is_default }}">
+  {% endfor %}
+</div>
+<script>
+  function loadTemplateIntoEditor(pk) {
+    var row = document.querySelector('#tpl-store .tpl-row[data-id="' + pk + '"]');
+    if (!row) { return; }
+    document.getElementById('templateName').value = row.getAttribute('data-name');
+    document.getElementById('templateId').value = pk;
+    document.getElementById('is_default').checked =
+      row.getAttribute('data-default') === 'True';
+    var body = row.getAttribute('data-content');
+    var ed = tinymce.get('editor');
+    if (ed) { ed.setContent(body); }
+    document.getElementById('templateName').scrollIntoView({behavior: 'smooth'});
+  }
+</script>
 
 <style>
   .center-content {

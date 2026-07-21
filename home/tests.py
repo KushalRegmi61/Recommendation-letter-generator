@@ -3894,3 +3894,25 @@ class SetDefaultTemplateTests(TestCase):
         self.assertEqual(resp.status_code, 404)
         theirs.refresh_from_db()
         self.assertFalse(theirs.is_default)
+
+
+class MakeTemplatePageTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof K", unique_id="T-K", email="k@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_own_templates_listed_with_actions(self):
+        CustomTemplates.objects.create(
+            template_name="My Letter", template="x", professor=self.teacher,
+        )
+        resp = self.client.get("/makeTemplate")
+        self.assertContains(resp, "My Letter")
+        self.assertContains(resp, "/deleteTemplate")
+        self.assertContains(resp, "/setDefaultTemplate")
+
+    def test_palette_uses_real_context_variable(self):
+        resp = self.client.get("/makeTemplate")
+        self.assertContains(resp, "app.name")
