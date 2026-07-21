@@ -3941,3 +3941,43 @@ class DashboardLayoutTests(TestCase):
     def test_dashboard_shows_recommended_section(self):
         resp = self.client.get("/teacher")
         self.assertContains(resp, "Students You Have Recommended")
+
+
+class PruneTemplateCopiesTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof M", unique_id="T-M", email="m@example.com", department=self.dept,
+        )
+
+    def test_commit_removes_copy_rows_keeps_originals(self):
+        from django.core.management import call_command
+        keep = CustomTemplates.objects.create(
+            template_name="Default", professor=self.teacher, is_default=True,
+        )
+        j1 = CustomTemplates.objects.create(
+            template_name="Formal / Academic (copy)", professor=self.teacher,
+        )
+        j2 = CustomTemplates.objects.create(
+            template_name="Formal / Academic (copy) 3", professor=self.teacher,
+        )
+        call_command("prune_template_copies", "--commit")
+        self.assertTrue(CustomTemplates.objects.filter(pk=keep.pk).exists())
+        self.assertFalse(CustomTemplates.objects.filter(pk=j1.pk).exists())
+        self.assertFalse(CustomTemplates.objects.filter(pk=j2.pk).exists())
+
+    def test_dry_run_deletes_nothing(self):
+        from django.core.management import call_command
+        j1 = CustomTemplates.objects.create(
+            template_name="General Purpose (copy) 5", professor=self.teacher,
+        )
+        call_command("prune_template_copies")
+        self.assertTrue(CustomTemplates.objects.filter(pk=j1.pk).exists())
+
+    def test_system_templates_are_never_touched(self):
+        from django.core.management import call_command
+        system_before = CustomTemplates.objects.filter(is_system=True).count()
+        call_command("prune_template_copies", "--commit")
+        self.assertEqual(
+            CustomTemplates.objects.filter(is_system=True).count(), system_before
+        )
