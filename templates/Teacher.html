@@ -4,13 +4,16 @@
 {% block teacher %}{% if teacher_model.images %}<a href="teacher"><img src="{{ teacher_model.images.url }}" style="width:33px;height:33px; border-radius: 50%;" ></a>{% endif %}{% endblock teacher %}
 
 {% block body %}
-<h1 style="text-align:center"><br><u> Requests:</u>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<button class="btn btn-primary" onClick="window.location.reload()">Refresh</button></h1>
-
-<div class="container-fluid" style="text-align:center; margin: 8px 0 20px;">
+<div class="container-fluid d-flex justify-content-center align-items-center gap-2" style="margin: 16px 0;">
   <a href="/makeTemplate" class="btn btn-primary">Manage Templates</a>
+  <button type="button" class="btn btn-outline-primary" title="Refresh" aria-label="Refresh"
+          onClick="window.location.reload()"><i class="bi bi-arrow-clockwise"></i></button>
 </div>
 
 <div class="container-fluid">
+  <p class="text-center text-muted mb-2" style="font-weight:500;">
+    Filter students — applies to both pending requests and recommended candidates
+  </p>
   <form method="get" action="/teacher" class="row g-2 align-items-end mb-4">
     <div class="col-auto">
       <label for="filter-q" class="form-label">Search student</label>

@@ -3942,6 +3942,18 @@ class DashboardLayoutTests(TestCase):
         resp = self.client.get("/teacher")
         self.assertContains(resp, "Students You Have Recommended")
 
+    def test_requests_heading_is_gone_and_refresh_is_an_icon(self):
+        resp = self.client.get("/teacher")
+        # The old underlined "Requests:" heading and text "Refresh" button are gone.
+        self.assertNotContains(resp, "<u> Requests:</u>")
+        self.assertNotContains(resp, ">Refresh</button>")
+        # Refresh is now an inline icon button.
+        self.assertContains(resp, "bi-arrow-clockwise")
+
+    def test_filter_bar_is_labelled_as_covering_both_lists(self):
+        resp = self.client.get("/teacher")
+        self.assertContains(resp, "applies to both pending requests and recommended")
+
 
 class PruneTemplateCopiesTests(TestCase):
     def setUp(self):
