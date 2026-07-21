@@ -3769,3 +3769,55 @@ class StaleStudentCookieTests(TestCase):
         response = self.client.get("/studentDetails")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "080BCT990")
+
+
+class TemplateEditByIdTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof E", unique_id="T-E", email="e@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_editing_by_id_renames_in_place_without_duplicating(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Old Name", template="body", professor=self.teacher,
+        )
+        resp = self.client.post("/getTemplate", {
+            "template_id": tpl.pk,
+            "templateName": "New Name",
+            "content": "updated body",
+        })
+        self.assertEqual(resp.status_code, 200)
+        tpl.refresh_from_db()
+        self.assertEqual(tpl.template_name, "New Name")
+        self.assertEqual(
+            CustomTemplates.objects.filter(professor=self.teacher).count(), 1
+        )
+
+    def test_saving_without_id_creates_new_template(self):
+        resp = self.client.post("/getTemplate", {
+            "templateName": "Brand New",
+            "content": "hello",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(
+            CustomTemplates.objects.filter(
+                professor=self.teacher, template_name="Brand New"
+            ).exists()
+        )
+
+    def test_cannot_edit_another_teachers_template_by_id(self):
+        other = TeacherInfo.objects.create(
+            name="Prof F", unique_id="T-F", email="f@example.com", department=self.dept,
+        )
+        theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="x", professor=other,
+        )
+        self.client.post("/getTemplate", {
+            "template_id": theirs.pk,
+            "templateName": "Hijacked",
+            "content": "y",
+        })
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.template_name, "Theirs")

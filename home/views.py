@@ -1617,20 +1617,41 @@ def getTemplate(request):
     if make_default:
         CustomTemplates.objects.filter(professor=teacher, is_default=True).update(is_default=False)
 
-    # try to update existing template with same name
-    template_obj = CustomTemplates.objects.filter(template_name=name, professor=teacher).first()
+    # Edit is keyed by primary key, not by name: matching on name meant that
+    # renaming a template created a second row instead of renaming the first.
+    template_id = (request.POST.get("template_id") or "").strip()
+    template_obj = None
+    if template_id:
+        # Own templates only. A pk that is not this teacher's (including any
+        # system row) resolves to nothing and falls through to create-new.
+        template_obj = CustomTemplates.objects.filter(
+            pk=template_id, professor=teacher
+        ).first()
+
     if template_obj:
+        template_obj.template_name = name
         template_obj.template = content
         if make_default:
             template_obj.is_default = True
         template_obj.save()
     else:
-        template_obj = CustomTemplates.objects.create(
-            template_name=name,
-            template=content,
-            professor=teacher,
-            is_default=make_default,
-        )
+        # No id (a genuinely new save). Fall back to updating a same-named row
+        # so re-saving "Default" keeps updating the one default.
+        template_obj = CustomTemplates.objects.filter(
+            template_name=name, professor=teacher
+        ).first()
+        if template_obj:
+            template_obj.template = content
+            if make_default:
+                template_obj.is_default = True
+            template_obj.save()
+        else:
+            template_obj = CustomTemplates.objects.create(
+                template_name=name,
+                template=content,
+                professor=teacher,
+                is_default=make_default,
+            )
 
     return render(request, "customTemplate.html", {
         'professor': teacher,
