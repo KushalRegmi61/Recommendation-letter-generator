@@ -4067,14 +4067,14 @@ class StudentDetailsPanelTests(TestCase):
     def test_panel_shows_the_newly_exposed_fields(self):
         app = Application.objects.create(
             name="Mina Rai", std=self.student, professor=self.teacher, subjects="Maths",
-            intern_company="Acme Labs", scholarships="Dean's List 2024",
+            intern_company="Acme Labs", scholarships="National Merit Scholarship",
         )
         Qualities.objects.create(application=app, leadership=True)
         University.objects.create(application=app, uni_name="MIT", country="USA")
         University.objects.create(application=app, uni_name="ETH", country="Switzerland")
         resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
         self.assertContains(resp, "Acme Labs")
-        self.assertContains(resp, "Dean's List 2024")
+        self.assertContains(resp, "National Merit Scholarship")
         self.assertContains(resp, "Leadership")
         self.assertContains(resp, "MIT")
         self.assertContains(resp, "ETH")
