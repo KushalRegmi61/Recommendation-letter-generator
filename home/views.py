@@ -254,18 +254,56 @@ def final(request, *args, **kwargs):
         return redirect("media/letter/"+roll+"_"+ application.professor.name +".pdf")
 
 def studentfinal(request, *args, **kwargs):
-    if request.method == "POST":
-        pdf_or_docs = request.POST.get("id")
-        roll = request.POST.get("roll")
-        prof = request.POST.get('prof_name')
+    """Serve a generated letter as PDF or DOCX for the professor who owns it.
 
-        if pdf_or_docs == 'pdf':
-            return redirect("media/letter/"+roll+"_"+prof+".pdf")
-        else: 
-            try:
-                return redirect("media/docs/"+roll+"_"+prof+".docx")
-            except:
-                return redirect("media/letter/"+roll+"_"+prof+".pdf")
+    The dashboard's PDF/DOCX buttons used to redirect to legacy on-disk paths
+    (``media/letter/<roll>_<prof>.pdf`` / ``media/docs/...``) that the current
+    pipeline never writes -- ``download_letter`` stores letters in the
+    ``generated_letter`` FileField instead -- so every click 404'd. We now render
+    the letter from the application's template with the same helpers as
+    ``download_letter`` and stream the bytes, scoped to the signed-in professor.
+    """
+    if request.method != "POST":
+        return redirect("/teacher")
+
+    teacher = current_teacher(request)
+    if teacher is None:
+        return redirect("/loginTeacher")
+
+    # Own applications only: a roll that is not this professor's is a 404, never
+    # another professor's letter.
+    application = get_object_or_404(
+        Application,
+        std__roll_number=request.POST.get("roll"),
+        professor__unique_id=teacher.unique_id,
+    )
+
+    template_obj = application.generated_template or select_template(application.professor)
+    letter_text = render_letter(application, template_obj)
+    if not letter_text.strip():
+        # ``render_letter`` returns "" when the template fails to compile; refuse
+        # rather than streaming a blank file.
+        messages.error(request, "That letter could not be rendered. Check the template for errors.")
+        return redirect("/teacher")
+
+    safe_name = slugify(application.name) or "letter"
+    if request.POST.get("id") == "docs":
+        payload = build_docx_bytes(letter_text)
+        content_type = (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        )
+        filename = f"Recommendation_{safe_name}.docx"
+        disposition = "attachment"
+    else:
+        payload = build_pdf_bytes(letter_text)
+        content_type = "application/pdf"
+        filename = f"Recommendation_{safe_name}.pdf"
+        disposition = "inline"
+
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    return response
 
 def registerStudent(request):
     departments = Department.objects.all().values()

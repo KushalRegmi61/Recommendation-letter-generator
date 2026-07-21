@@ -1901,6 +1901,59 @@ class MakeLetterTemplateListTests(TestCase):
         self.assertNotContains(response, 'name="temp"')
 
 
+class StudentFinalServesLetterTests(TestCase):
+    """The dashboard PDF/DOCX buttons stream a freshly rendered letter.
+
+    Regression: ``studentfinal`` used to redirect to a legacy on-disk path
+    (``media/letter/<roll>_<prof>.pdf``) that the current pipeline never writes,
+    so every click 404'd.
+    """
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Aman Shakya", unique_id="T-AS", email="as@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Other Prof", unique_id="T-OP", email="op@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Kushal", roll_number="080BCT042", department=self.dept,
+            program=self.program, password="x", dob="2004-08-03", gender="Male",
+        )
+        self.app = Application.objects.create(
+            name="Kushal", std=self.student, professor=self.teacher,
+            subjects="Maths", is_generated=True,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_pdf_button_streams_a_pdf_not_a_media_redirect(self):
+        resp = self.client.post(
+            "/studentfinal", {"roll": "080BCT042", "id": "pdf", "prof_name": "Aman Shakya"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+
+    def test_docx_button_streams_a_docx(self):
+        resp = self.client.post(
+            "/studentfinal", {"roll": "080BCT042", "id": "docs", "prof_name": "Aman Shakya"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("wordprocessingml", resp["Content-Type"])
+
+    def test_another_professors_student_is_not_served(self):
+        login_as_teacher(self.client, self.other)
+        resp = self.client.post(
+            "/studentfinal", {"roll": "080BCT042", "id": "pdf", "prof_name": "Aman Shakya"}
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_redirects_to_dashboard(self):
+        resp = self.client.get("/studentfinal")
+        self.assertEqual(resp.status_code, 302)
+
+
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class DownloadLetterTests(TestCase):
     """Exporting a letter stores it and stamps the tracking fields (FR-1/FR-5)."""
