@@ -477,24 +477,28 @@ def make_letter(request):
 
         stu = StudentLoginInfo.objects.get(roll_number=roll)
         appli = Application.objects.get(name=stu.username, professor__unique_id=teacher_id)
-        paper = Paper.objects.get(application=appli)
-        project = Project.objects.get(application = appli)
-        
+
+        # Satellites may be absent (student skipped a section) or plural (several
+        # universities/papers/projects). ``.first()`` keeps the single-value
+        # template refs working without a 500; the querysets feed the full panel.
+        paper = Paper.objects.filter(application=appli).first()
+        project = Project.objects.filter(application=appli).first()
+        university = University.objects.filter(application=appli).first()
+        quality = Qualities.objects.filter(application=appli).first()
+        academics = Academics.objects.filter(application=appli).first()
+        files = Files.objects.filter(application=appli).first()
+
+        universities = University.objects.filter(application=appli)
+        papers = Paper.objects.filter(application=appli)
+        projects = Project.objects.filter(application=appli)
+
         linkedin = appli.linkedIn
         personal_statement = appli.personal_statement
         recommendation_purpose = appli.recommendation_purpose
 
-        university = University.objects.get(application=appli)
-        quality = Qualities.objects.get(application=appli)
-        academics = Academics.objects.get(application=appli)
-        files = Files.objects.get(application=appli)
-
         templates = available_templates(appli.professor)
         default_template = templates.filter(is_default=True).first()
-
         teacher_name = appli.professor.name
-
-        
 
         return render(
             request,
@@ -507,15 +511,17 @@ def make_letter(request):
                 "university": university,
                 "quality": quality,
                 "academics": academics,
+                "files": files,
+                "universities": universities,
+                "papers": papers,
+                "projects": projects,
                 "teacher": teacher_name,
                 "teacher_model": teacher_model,
-                "files": files, 
-                'templates': templates,
-                'default_template': default_template,
-                'linkedin': linkedin,  
-                'personal_statement': personal_statement, 
-                'recommendation_purpose': recommendation_purpose              
-                
+                "templates": templates,
+                "default_template": default_template,
+                "linkedin": linkedin,
+                "personal_statement": personal_statement,
+                "recommendation_purpose": recommendation_purpose,
             },
         )
 

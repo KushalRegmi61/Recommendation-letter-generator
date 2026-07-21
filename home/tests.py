@@ -4042,3 +4042,51 @@ class TemplateEditGuardTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         t.refresh_from_db()
         self.assertEqual(t.template_name, "Fresh")
+
+
+class StudentDetailsPanelTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-BCT", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof R", unique_id="T-R", email="r@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="Mina Rai", roll_number="080BCT900", department=self.dept,
+            program=self.program, password="x", dob="2000-01-01", gender="Female",
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_generation_page_survives_a_bare_application(self):
+        Application.objects.create(
+            name="Mina Rai", std=self.student, professor=self.teacher, subjects="Maths",
+        )
+        resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_panel_shows_the_newly_exposed_fields(self):
+        app = Application.objects.create(
+            name="Mina Rai", std=self.student, professor=self.teacher, subjects="Maths",
+            intern_company="Acme Labs", scholarships="Dean's List 2024",
+        )
+        Qualities.objects.create(application=app, leadership=True)
+        University.objects.create(application=app, uni_name="MIT", country="USA")
+        University.objects.create(application=app, uni_name="ETH", country="Switzerland")
+        resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
+        self.assertContains(resp, "Acme Labs")
+        self.assertContains(resp, "Dean's List 2024")
+        self.assertContains(resp, "Leadership")
+        self.assertContains(resp, "MIT")
+        self.assertContains(resp, "ETH")
+
+    def test_the_two_file_modals_have_distinct_ids(self):
+        app = Application.objects.create(
+            name="Mina Rai", std=self.student, professor=self.teacher,
+        )
+        files = Files.objects.create(application=app)
+        for field in ("transcript", "CV"):
+            getattr(files, field).save(f"{field}.png", ContentFile(b"x"), save=False)
+        files.save()
+        resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
+        self.assertContains(resp, 'id="modalTranscript"')
+        self.assertContains(resp, 'id="modalCV"')
