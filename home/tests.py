@@ -4090,3 +4090,22 @@ class StudentDetailsPanelTests(TestCase):
         resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
         self.assertContains(resp, 'id="modalTranscript"')
         self.assertContains(resp, 'id="modalCV"')
+
+    def test_a_javascript_url_is_not_rendered_as_a_link(self):
+        app = Application.objects.create(
+            name="Mina Rai", std=self.student, professor=self.teacher,
+            linkedIn="javascript:alert(document.cookie)",
+        )
+        Paper.objects.create(
+            application=app, paper_title="Paper A", paper_link="javascript:alert(1)",
+        )
+        resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
+        self.assertNotContains(resp, 'href="javascript:')
+
+    def test_an_http_link_is_still_linkified(self):
+        Application.objects.create(
+            name="Mina Rai", std=self.student, professor=self.teacher,
+            linkedIn="https://linkedin.com/in/mina",
+        )
+        resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
+        self.assertContains(resp, 'href="https://linkedin.com/in/mina"')
