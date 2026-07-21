@@ -1740,6 +1740,30 @@ def delete_template(request):
     return redirect("/makeTemplate")
 
 
+def set_default_template(request):
+    """Mark one of the professor's own templates as their default."""
+    if request.method != "POST":
+        return redirect("/makeTemplate")
+
+    teacher = current_teacher(request)
+    if teacher is None:
+        return redirect("/loginTeacher")
+
+    template_obj = get_object_or_404(
+        CustomTemplates, pk=request.POST.get("template_id") or 0, professor=teacher
+    )
+    # Exactly one default per professor: clear the others, then set this one.
+    CustomTemplates.objects.filter(professor=teacher, is_default=True).update(
+        is_default=False
+    )
+    template_obj.is_default = True
+    template_obj.save(update_fields=["is_default"])
+    messages.success(
+        request, f'"{template_obj.template_name}" is now your default template.'
+    )
+    return redirect("/makeTemplate")
+
+
 def admin_login(request):
     try:
         if request.user.is_authenticated and request.user.is_superuser:

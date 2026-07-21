@@ -3859,3 +3859,38 @@ class DeleteTemplateTests(TestCase):
     def test_get_is_rejected(self):
         resp = self.client.get("/deleteTemplate")
         self.assertEqual(resp.status_code, 302)
+
+
+class SetDefaultTemplateTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof I", unique_id="T-I", email="i@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof J", unique_id="T-J", email="j@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_setting_default_clears_the_previous_default(self):
+        a = CustomTemplates.objects.create(
+            template_name="A", professor=self.teacher, is_default=True,
+        )
+        b = CustomTemplates.objects.create(
+            template_name="B", professor=self.teacher, is_default=False,
+        )
+        resp = self.client.post("/setDefaultTemplate", {"template_id": b.pk})
+        self.assertEqual(resp.status_code, 302)
+        a.refresh_from_db()
+        b.refresh_from_db()
+        self.assertFalse(a.is_default)
+        self.assertTrue(b.is_default)
+
+    def test_cannot_set_another_teachers_template_as_default(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Theirs", professor=self.other,
+        )
+        resp = self.client.post("/setDefaultTemplate", {"template_id": theirs.pk})
+        self.assertEqual(resp.status_code, 404)
+        theirs.refresh_from_db()
+        self.assertFalse(theirs.is_default)
