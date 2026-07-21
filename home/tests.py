@@ -3821,3 +3821,41 @@ class TemplateEditByIdTests(TestCase):
         })
         theirs.refresh_from_db()
         self.assertEqual(theirs.template_name, "Theirs")
+
+
+class DeleteTemplateTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof G", unique_id="T-G", email="g@example.com", department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            name="Prof H", unique_id="T-H", email="h@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_deletes_own_template(self):
+        tpl = CustomTemplates.objects.create(
+            template_name="Junk (copy) 3", template="x", professor=self.teacher,
+        )
+        resp = self.client.post("/deleteTemplate", {"template_id": tpl.pk})
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(CustomTemplates.objects.filter(pk=tpl.pk).exists())
+
+    def test_cannot_delete_another_teachers_template(self):
+        theirs = CustomTemplates.objects.create(
+            template_name="Theirs", template="x", professor=self.other,
+        )
+        resp = self.client.post("/deleteTemplate", {"template_id": theirs.pk})
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(CustomTemplates.objects.filter(pk=theirs.pk).exists())
+
+    def test_cannot_delete_system_template(self):
+        system = CustomTemplates.objects.filter(is_system=True).first()
+        resp = self.client.post("/deleteTemplate", {"template_id": system.pk})
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(CustomTemplates.objects.filter(pk=system.pk).exists())
+
+    def test_get_is_rejected(self):
+        resp = self.client.get("/deleteTemplate")
+        self.assertEqual(resp.status_code, 302)

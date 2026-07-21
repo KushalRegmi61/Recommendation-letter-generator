@@ -1720,6 +1720,26 @@ def duplicate_template(request):
     return redirect("/makeTemplate")
 
 
+def delete_template(request):
+    """Delete one of the professor's own templates (never a system template)."""
+    if request.method != "POST":
+        return redirect("/makeTemplate")
+
+    teacher = current_teacher(request)
+    if teacher is None:
+        return redirect("/loginTeacher")
+
+    # Own templates only: a pk that is not this teacher's (including any shared
+    # system row) is a 404, not a silent no-op.
+    template_obj = get_object_or_404(
+        CustomTemplates, pk=request.POST.get("template_id") or 0, professor=teacher
+    )
+    name = template_obj.template_name or "Untitled"
+    template_obj.delete()
+    messages.success(request, f'Deleted "{name}".')
+    return redirect("/makeTemplate")
+
+
 def admin_login(request):
     try:
         if request.user.is_authenticated and request.user.is_superuser:
