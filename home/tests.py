@@ -2431,9 +2431,14 @@ class TemplateEditorPrefillTests(TestCase):
         login_as_teacher(self.client, self.teacher)
 
     def _option_attr(self, html):
+        # The editor now renders each of the professor's templates as a hidden
+        # ``.tpl-row`` whose ``data-content`` attribute the Edit button reads
+        # back with getAttribute() (the visible list replaced the old dropdown
+        # <option>). The escaping property under test is unchanged: autoescaping,
+        # not escapejs, must encode the attribute.
         import re
-        match = re.search(r'data-content="(.*?)" data-name', html, re.S)
-        self.assertIsNotNone(match, "the existing-template option was not rendered")
+        match = re.search(r'data-content="(.*?)"\s+data-default', html, re.S)
+        self.assertIsNotNone(match, "the existing-template row was not rendered")
         return match.group(1)
 
     def test_the_dropdown_body_is_not_javascript_escaped(self):
@@ -2505,18 +2510,13 @@ class DashboardTemplateLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "/makeTemplate")
 
-    def test_a_professor_with_no_default_is_told_about_the_starter_library(self):
-        response = self.client.get("/teacher")
-        self.assertContains(response, "starter template")
-
-    def test_a_professor_with_a_default_sees_its_name(self):
-        CustomTemplates.objects.create(
-            template_name="My Favourite", template="body",
-            professor=self.teacher, is_default=True,
-        )
-        response = self.client.get("/teacher")
-        self.assertContains(response, "My Favourite")
-        self.assertNotContains(response, "starter template")
+    # The dashboard no longer renders the default template's name or a
+    # starter-library hint inline: template management moved off the dashboard
+    # to the /makeTemplate page (Phase A). Awareness of the default now lives
+    # there, where each template shows its "(default)" badge. The former
+    # ``..._is_told_about_the_starter_library`` and ``..._sees_its_name`` tests
+    # asserted that removed inline block and were dropped with it;
+    # ``DashboardLayoutTests`` guards the removal.
 
 
 class QualityPersistenceTests(TestCase):
