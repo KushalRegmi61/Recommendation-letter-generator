@@ -3981,3 +3981,52 @@ class PruneTemplateCopiesTests(TestCase):
         self.assertEqual(
             CustomTemplates.objects.filter(is_system=True).count(), system_before
         )
+
+
+class TemplateEditGuardTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            name="Prof Q", unique_id="T-Q", email="q@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_delete_with_non_numeric_id_is_404_not_500(self):
+        resp = self.client.post("/deleteTemplate", {"template_id": "abc"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_set_default_with_non_numeric_id_is_404_not_500(self):
+        resp = self.client.post("/setDefaultTemplate", {"template_id": "abc"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_rename_to_an_existing_own_name_is_rejected(self):
+        a = CustomTemplates.objects.create(
+            template_name="Alpha", template="a", professor=self.teacher,
+        )
+        b = CustomTemplates.objects.create(
+            template_name="Beta", template="b", professor=self.teacher,
+        )
+        # Try to rename B to "Alpha" (collision).
+        resp = self.client.post("/getTemplate", {
+            "template_id": b.pk, "templateName": "Alpha", "content": "b2",
+        })
+        self.assertEqual(resp.status_code, 200)
+        b.refresh_from_db()
+        self.assertEqual(b.template_name, "Beta")  # unchanged
+        self.assertEqual(
+            CustomTemplates.objects.filter(
+                professor=self.teacher, template_name="Alpha"
+            ).count(),
+            1,
+        )
+
+    def test_a_normal_rename_still_works(self):
+        t = CustomTemplates.objects.create(
+            template_name="Old", template="x", professor=self.teacher,
+        )
+        resp = self.client.post("/getTemplate", {
+            "template_id": t.pk, "templateName": "Fresh", "content": "y",
+        })
+        self.assertEqual(resp.status_code, 200)
+        t.refresh_from_db()
+        self.assertEqual(t.template_name, "Fresh")

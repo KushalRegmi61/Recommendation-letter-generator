@@ -1621,14 +1621,30 @@ def getTemplate(request):
     # renaming a template created a second row instead of renaming the first.
     template_id = (request.POST.get("template_id") or "").strip()
     template_obj = None
-    if template_id:
+    if template_id.isdigit():
         # Own templates only. A pk that is not this teacher's (including any
-        # system row) resolves to nothing and falls through to create-new.
+        # system row) resolves to nothing and falls through to create-new. A
+        # non-numeric id harmlessly falls through to the create/name path too.
         template_obj = CustomTemplates.objects.filter(
             pk=template_id, professor=teacher
         ).first()
 
     if template_obj:
+        # Reject a rename that would collide with another of this teacher's
+        # templates, otherwise editing by id could produce a duplicate name.
+        clash = (
+            CustomTemplates.objects.filter(professor=teacher, template_name=name)
+            .exclude(pk=template_obj.pk)
+            .exists()
+        )
+        if clash:
+            messages.error(request, f'You already have a template named "{name}".')
+            return render(request, "customTemplate.html", {
+                "professor": teacher,
+                "templates": CustomTemplates.objects.filter(professor=teacher),
+                "system_templates": system_templates().order_by("template_name"),
+                "template": template_obj,
+            })
         template_obj.template_name = name
         template_obj.template = content
         if make_default:
@@ -1731,9 +1747,11 @@ def delete_template(request):
 
     # Own templates only: a pk that is not this teacher's (including any shared
     # system row) is a 404, not a silent no-op.
-    template_obj = get_object_or_404(
-        CustomTemplates, pk=request.POST.get("template_id") or 0, professor=teacher
-    )
+    try:
+        pk = int(request.POST.get("template_id", ""))
+    except (TypeError, ValueError):
+        raise Http404("No valid template requested.")
+    template_obj = get_object_or_404(CustomTemplates, pk=pk, professor=teacher)
     name = template_obj.template_name or "Untitled"
     template_obj.delete()
     messages.success(request, f'Deleted "{name}".')
@@ -1749,9 +1767,11 @@ def set_default_template(request):
     if teacher is None:
         return redirect("/loginTeacher")
 
-    template_obj = get_object_or_404(
-        CustomTemplates, pk=request.POST.get("template_id") or 0, professor=teacher
-    )
+    try:
+        pk = int(request.POST.get("template_id", ""))
+    except (TypeError, ValueError):
+        raise Http404("No valid template requested.")
+    template_obj = get_object_or_404(CustomTemplates, pk=pk, professor=teacher)
     # Exactly one default per professor: clear the others, then set this one.
     CustomTemplates.objects.filter(professor=teacher, is_default=True).update(
         is_default=False
