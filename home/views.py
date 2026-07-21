@@ -43,7 +43,6 @@ from django.core.mail import mail_admins
 
 # to create random number for OTP
 from random import randint
-from pdf2docx import Converter
 # Create your views here.
 #import os
 #os.environ["SSL_CERT_FILE"] = r"C:\\Users\\lovel\\Desktop\\Recommendation-Letter-Generator\\venv\\Lib\\site-packages\\certifi\\cacert.pem"
@@ -110,8 +109,6 @@ def gallery(request):
     return render(request, "gallery.html")
 
 
-import textwrap
-from fpdf import FPDF
 from io import BytesIO as bio
 #import fs
 from home.forms import StudentForm
@@ -120,62 +117,6 @@ from home.letters import (
     available_templates, build_docx_bytes, build_pdf_bytes,
     render_letter, select_template, system_templates, visible_to,
 )
-
-def text_to_pdf(text,roll, name):
-    a4_width_mm = 270
-    pt_to_mm = 0.35
-    fontsize_pt = 11
-    fontsize_mm = fontsize_pt * pt_to_mm
-    margin_bottom_mm = 10
-    character_width_mm = 7 * pt_to_mm
-    width_text = (a4_width_mm / 1*character_width_mm)
-    
-    pdf = FPDF(orientation="P", unit="mm", format="Letter")
-    pdf.set_auto_page_break(True, margin=margin_bottom_mm)
-    pdf.add_page()
-    
-    pdf.set_font("Arial", 'B', size=fontsize_pt*1.2)
-    pdf.cell(0, 10,"Letter of Recommendation ",align='C')
-    pdf.set_y(15)
-    pdf.set_font(family="Arial", size=fontsize_pt)
-    
-    splitted = text.split("\n")
-    a=0
-    for line in splitted:
-        lines = textwrap.wrap(line, width_text*1.2)
-
-        if a==0:
-            if len(lines) == 0:
-                pdf.ln()
-                a=a+1
-                continue
-        else:
-            if len(lines) == 0:
-                continue
-      
-         
-
-        for wrap in lines:
-            pdf.set_right_margin(25)
-
-            pdf.set_x(25)
-            pdf.multi_cell(0, fontsize_mm*1.5, wrap)
-            a=a-1
-           
-
-
-
-    pdf.output("media/letter/"+roll+'_'+name+".pdf", "F")
-    print("pdf generated")
-
-    # docx_path = os.path.join(settings.MEDIA_ROOT, "letter", f"{roll}_{name}.docx")
-    cv = Converter("media/letter/"+roll+'_'+name+".pdf")
-    cv.convert("media/docs/" + roll + "_"+name + ".docx", start=0, end=None)
-    print("docx generated")
-    cv.close()
-
-    # Return download link for the DOCX file
-
 
 
 
@@ -225,33 +166,6 @@ def mail_admins_safely(subject, message, fail_message=None):
         )
         return False
 
-
-### xhtml2pdf
-def final(request, *args, **kwargs):
-    if request.method == "POST":
-        textarea1 = request.POST.get("textarea1")
-        roll = request.POST.get("roll")
-        teacher = current_teacher(request)
-        if teacher is None:
-            return redirect("/loginTeacher")
-        unique = teacher.unique_id
-        application = Application.objects.get(std__roll_number=roll, professor__unique_id=unique)
-        
-
-
-        # textarea2 = request.POST.get("textarea2")
-        # textarea3 = request.POST.get("textarea3")
-        letter=f'''
-                \n{textarea1}
-        '''
-        print("inside final")
-        print(textarea1)
-        text_to_pdf(letter,roll, application.professor.name)
-        application.is_generated = True
-        application.save() 
-        messages.error(request, "Sorry!  The Credentials doesn't match.")
-        send_mail('Recommendation Letter', 'Dear sir, \n Your letter has been generated your letter of recommendation. \n \n Best Regards, \n Ioe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [application.email], fail_silently=True)
-        return redirect("media/letter/"+roll+"_"+ application.professor.name +".pdf")
 
 def studentfinal(request, *args, **kwargs):
     """Serve a generated letter as PDF or DOCX for the professor who owns it.
@@ -1951,7 +1865,6 @@ from django.contrib.auth.models import User
 from docx import Document
 from jinja2 import Template
 import datetime
-from fpdf import FPDF
 
 def download_generated(request):
     """Re-serve the letter stored on an Application (FR-5).

@@ -13,7 +13,6 @@ urlpatterns = [
     path('studentform1', views.studentform1, name='Studentform1'),
     path('studentform2', views.studentform2, name='Studentform2'),
     path('makeLetter', views.make_letter, name='MakeLetter'),
-    path('final', views.final, name='Final'),
     path('gallery', views.gallery, name='Gallery'),
     path('studentfinal', views.studentfinal, name='StudentFinal'),
     path('forgotPassword', views.forgotPassword, name='forgotPassword'),
