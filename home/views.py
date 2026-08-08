@@ -427,8 +427,13 @@ def make_letter(request):
             return redirect("/loginTeacher")
         teacher_id = teacher_model.unique_id
 
-        stu = StudentLoginInfo.objects.get(roll_number=roll)
-        appli = Application.objects.get(name=stu.username, professor__unique_id=teacher_id)
+        # Join through the ``std`` FK, not ``Application.name``: that field is
+        # the free-text name typed on the application form and routinely differs
+        # from the student's login username, which made this lookup miss rows
+        # that were plainly there. The roll number is the student's PK.
+        appli = Application.objects.get(
+            std__roll_number=roll, professor__unique_id=teacher_id
+        )
 
         # Satellites may be absent (student skipped a section) or plural (several
         # universities/papers/projects). ``.first()`` keeps the single-value
@@ -2000,20 +2005,16 @@ def registerProfessor(request):
                 last_name='/' + unique_id,
                 email=teacher_info.email
             )
-            # Self-registration is public and unauthenticated, so a new
-            # professor lands inactive and cannot authenticate until a
-            # superuser approves them (User.is_active is toggleable in the
-            # stock Django admin). Accounts created from adminDashboard are
-            # deliberate and stay active.
-            user.is_active = False
-            user.save()
+            # Registration is open: professors self-register and log in
+            # immediately. Vetting a requesting student's authenticity is the
+            # professor's responsibility, not an admin gate on the account.
 
             # Link the record to its login account, so identity resolves from
             # the session rather than the legacy name convention.
             teacher_info.user = user
             teacher_info.save(update_fields=["user"])
 
-            messages.success(request, 'Professor registered successfully! Your account is awaiting administrator approval - you will be able to log in once it has been approved.')
+            messages.success(request, 'Professor registered successfully! You can now log in.')
             return redirect('loginTeacher')
     else:
         form = TeacherInfoForm()

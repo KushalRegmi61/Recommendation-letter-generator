@@ -3307,8 +3307,12 @@ class UsernameCookieImpersonationTests(TestCase):
         self.assertNotIn("username", response.cookies)
 
 
-class ProfessorApprovalTests(TestCase):
-    """Self-registered professors are inactive until a superuser approves them."""
+class ProfessorRegistrationTests(TestCase):
+    """Registration is open: a self-registered professor can log in at once.
+
+    Vetting a requesting student's authenticity is the professor's job, not an
+    administrator gate on the professor's own account.
+    """
 
     def setUp(self):
         self.dept = Department.objects.create(dept_name="BCT")
@@ -3323,44 +3327,30 @@ class ProfessorApprovalTests(TestCase):
             "password": "signup-pw", "confirm_password": "signup-pw",
         })
 
-    def test_a_self_registered_professor_is_inactive(self):
+    def test_a_self_registered_professor_is_active(self):
         self._register()
         user = User.objects.get(email="new@example.com")
-        self.assertFalse(user.is_active)
+        self.assertTrue(user.is_active)
 
-    def test_an_unapproved_professor_cannot_log_in(self):
+    def test_a_self_registered_professor_can_log_in_immediately(self):
         self._register()
-        self.client.post("/loginTeacher", {
-            "username": "new@example.com", "password": "signup-pw",
-        })
-        # Not signed in: no session user.
-        self.assertNotIn("_auth_user_id", self.client.session)
-
-    def test_an_approved_professor_can_log_in(self):
-        self._register()
-        user = User.objects.get(email="new@example.com")
-        user.is_active = True
-        user.save()
         self.client.post("/loginTeacher", {
             "username": "new@example.com", "password": "signup-pw",
         })
         self.assertIn("_auth_user_id", self.client.session)
 
-    def test_the_teacher_row_is_still_created_and_linked(self):
-        # Approval gates login, not record creation - the admin needs the row
-        # in order to review and approve it.
+    def test_the_teacher_row_is_created_and_linked(self):
         self._register()
         teacher = TeacherInfo.objects.get(email="new@example.com")
         self.assertIsNotNone(teacher.user)
-        self.assertFalse(teacher.user.is_active)
+        self.assertTrue(teacher.user.is_active)
 
-    def test_the_registrant_is_told_approval_is_pending(self):
+    def test_the_registrant_is_not_told_to_wait_for_approval(self):
         response = self._register()
         text = " ".join(str(m) for m in response.wsgi_request._messages).lower()
-        self.assertIn("approval", text)
+        self.assertNotIn("approval", text)
 
     def test_a_superuser_created_professor_is_active(self):
-        # adminDashboard creates professors deliberately; those need no approval.
         admin = User.objects.create_superuser(
             username="root2", password="pw", email="root2@example.com",
         )

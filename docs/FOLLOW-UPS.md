@@ -69,9 +69,10 @@ and it survives the student changing their password. Either add `max_age` and ro
 change, or convert students to real Django sessions (larger, but removes the whole category).
 
 ### 2.3 `is_active` is not re-checked in teacher views
-Self-registered professors are inactive and `authenticate()` refuses them, so this is not
-currently reachable. But `current_teacher` only requires `is_authenticated`, so a session
-obtained by other means would still pass. Cheap to add.
+`current_teacher` only requires `is_authenticated`, so a session belonging to a manually
+deactivated account (there is no self-service deactivation, but an admin can flip `is_active`)
+would still pass. Registration is open, so no account is inactive by default — but re-checking
+`is_active` on each request is still cheap defence in depth.
 
 ### 2.4 Raise HSTS once TLS is confirmed
 `SECURE_HSTS_SECONDS` is deliberately 3600 (one hour) because a long max-age is hard to undo.

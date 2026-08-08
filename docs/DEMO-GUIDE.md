@@ -174,11 +174,10 @@ because the old credentials were committed to git and are compromised.
   is logged, not raised — but no mail arrives.
 - If you *want* mail for the demo, put a Gmail **app password** into `.env` first and restart.
 
-**Do not demo professor self-registration.** A self-registered professor is created **inactive**
-and cannot log in until a superuser approves them in `/admin/` (tick `is_active` on the user).
-That's the intended security behaviour, but it looks like a bug if you're not expecting it. If
-you *do* want to show it, show the approval step too — it's a good story: *"anyone could
-previously mint a professor account."*
+**Professor self-registration works and is safe to demo.** Registration is open: a professor
+signs up on `/registerProfessor/` and can log in immediately — no admin approval step. Verifying
+that a *requesting student* is genuine is the professor's own responsibility, which is why the
+account itself isn't gated.
 
 **Don't type a Devanagari name into a letter and export PDF.** It renders as blank boxes. The
 PDF engine can't do Devanagari text shaping. DOCX handles it fine, so use DOCX if it comes up.
@@ -221,7 +220,8 @@ are prevented.
 - **Password-reset OTP moved server-side** into the session — it used to live in a cookie the
   attacker controlled on both sides.
 - **Student identity is a signed cookie**; tampering is detected.
-- **Admin dashboard requires a superuser**; self-registered professors need approval.
+- **Admin dashboard requires a superuser.** Professor and student registration is open — no
+  approval gate; the professor vets each student request's authenticity.
 - **CSRF protection re-enabled** across all 30 forms.
 - **Secrets, DEBUG and allowed hosts read from the environment**; the app refuses to start with
   development defaults when `DEBUG=false`.
