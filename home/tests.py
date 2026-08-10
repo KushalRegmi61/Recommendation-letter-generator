@@ -4335,6 +4335,22 @@ class DeadlineFilterSortTests(TestCase):
         self.assertEqual(pending_names[:2], ["early", "late"])
         self.assertEqual(pending_names[-1], "none")
 
+    def test_sort_by_deadline_orders_the_generated_list_too(self):
+        # The sort override must also replace the generated list's default
+        # -generated_at, -id ordering (the other half of the requirement).
+        self.late.is_generated = True
+        self.late.save()
+        self.early.is_generated = True
+        self.early.save()
+        ctx = build_teacher_dashboard_context("12345", {"sort": "deadline"})
+        generated_names = [a.name for a in ctx["all_students"]]
+        self.assertEqual(generated_names, ["early", "late"])
+
+    def test_a_malformed_deadline_is_ignored_not_a_500(self):
+        scoped = Application.objects.filter(professor=self.prof)
+        result = apply_application_filters(scoped, {"deadline": "not-a-date"})
+        self.assertEqual({a.name for a in result}, {"early", "late", "none"})
+
 
 class StudentDeadlineRequiredTests(TestCase):
     def setUp(self):

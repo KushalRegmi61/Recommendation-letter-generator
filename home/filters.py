@@ -6,6 +6,7 @@ GET parameters.
 """
 
 from django.db.models import Q
+from django.utils.dateparse import parse_date
 
 #: GET parameter names the dashboard understands.
 FILTER_PARAMS = ("department", "country", "college", "q", "deadline")
@@ -44,7 +45,11 @@ def apply_application_filters(queryset, params):
     if college:
         queryset = queryset.filter(university__uni_name__icontains=college)
 
-    deadline = (params.get("deadline") or "").strip()
+    # Parse the raw GET value rather than handing it straight to the DateField
+    # lookup: a malformed or tampered value ("?deadline=xyz") would otherwise
+    # raise ValidationError -> 500. An unparseable date degrades to "no filter",
+    # mirroring how the icontains filters ignore blanks.
+    deadline = parse_date((params.get("deadline") or "").strip())
     if deadline:
         # "Show me who needs a letter before this date": match applications
         # with a university deadline on or before it. Null deadlines are
