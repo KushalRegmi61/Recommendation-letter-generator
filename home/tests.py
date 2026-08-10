@@ -4186,3 +4186,57 @@ class StudentDetailsPanelTests(TestCase):
         )
         resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
         self.assertContains(resp, 'href="https://linkedin.com/in/mina"')
+
+
+class AcademicsPresentTests(SimpleTestCase):
+    def test_both_blank_is_false(self):
+        from home.intake import academics_present
+        self.assertFalse(academics_present("", "   "))
+
+    def test_gpa_only_is_true(self):
+        from home.intake import academics_present
+        self.assertTrue(academics_present("3.8", ""))
+
+    def test_percentage_only_is_true(self):
+        from home.intake import academics_present
+        self.assertTrue(academics_present(None, "82.5"))
+
+
+class StudentForm2AcademicsTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice",
+        )
+
+    def _post(self, **overrides):
+        data = {
+            "roll": "075BCT001", "naam": "alice", "prof_name": "Dr Smith",
+            "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
+            "uni_deadline": "2026-12-01",
+            "gpa": "3.8", "final_percentage": "82.5",
+            "tentative_ranking": "Top 5%", "eca": "Robotics club",
+        }
+        data.update(overrides)
+        return self.client.post("/studentform2", data)
+
+    def test_both_blank_is_rejected(self):
+        self._post(gpa="", final_percentage="")
+        self.assertFalse(Academics.objects.filter(application=self.app).exists())
+
+    def test_gpa_only_saves(self):
+        self._post(gpa="3.8", final_percentage="")
+        self.assertTrue(Academics.objects.filter(application=self.app).exists())
+
+    def test_percentage_only_saves(self):
+        self._post(gpa="", final_percentage="82.5")
+        self.assertTrue(Academics.objects.filter(application=self.app).exists())

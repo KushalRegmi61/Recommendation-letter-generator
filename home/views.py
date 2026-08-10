@@ -810,7 +810,13 @@ def studentform2(request):
         if file_photo and file_photo.size > MAX_PHOTO_SIZE:
             return render(request, "studentform.html", {"error": "Photo file size exceeds the limit of 3MB."})
 
-
+        from home.intake import academics_present
+        if not academics_present(aca_gpa, final_percentage):
+            messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
+            return render(request, "student_success.html", {
+                "roll": uroll, "letter": False, "naam": naam,
+                "error": "Enter a GPA or a final percentage.",
+            })
 
         info = Application.objects.get(std__username = naam ,professor__name = prof_name )
 

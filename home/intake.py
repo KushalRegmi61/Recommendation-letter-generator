@@ -47,6 +47,15 @@ def parse_universities(names, countries, deadlines, programs):
     return rows
 
 
+def academics_present(gpa, final_percentage):
+    """True if at least one of GPA / final percentage was supplied.
+
+    The student (and the professor on the edit page) must give one or the
+    other; requiring both is unnecessary. Whitespace-only counts as blank.
+    """
+    return bool((gpa or "").strip() or (final_percentage or "").strip())
+
+
 def save_universities(application, rows):
     """Replace all University rows for an application with the given rows.
 
