@@ -4485,3 +4485,32 @@ class RenderCustomEditTests(TestCase):
         login_as_teacher(self.client, self.prof)
         resp = self.client.get("/renderCustom")
         self.assertEqual(resp.status_code, 302)
+
+
+class MakeLetterEditEntryTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice", is_generated=True,
+        )
+
+    def test_make_letter_opens_a_generated_application(self):
+        login_as_teacher(self.client, self.prof)
+        resp = self.client.post("/makeLetter", {"roll": "075BCT001"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["student"].pk, self.app.pk)
+
+    def test_dashboard_shows_an_edit_button_for_recommended(self):
+        login_as_teacher(self.client, self.prof)
+        resp = self.client.get("/teacher")
+        self.assertContains(resp, "makeLetter")
+        self.assertContains(resp, "Edit")

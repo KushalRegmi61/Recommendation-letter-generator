@@ -189,6 +189,13 @@
                   <i class="bi bi-download"></i> Re-download
                 </a>
                 {% endif %}
+                <form action='/makeLetter' method='POST' target="_blank" class="action-row">
+                  {% csrf_token %}
+                  <button class="btn btn-sm btn-warning" type='submit'
+                          value="{{ item.std.roll_number }}" name="roll">
+                    <i class="bi bi-pencil-square"></i> Edit &amp; regenerate
+                  </button>
+                </form>
               </div>
             </td>
           </tr>
