@@ -4385,3 +4385,42 @@ class StudentDeadlineRequiredTests(TestCase):
         resp = self._post_blank_deadline()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Each university needs a deadline.")
+
+
+class ApplyProfessorEditsTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice",
+        )
+        University.objects.create(uni_name="OLD", uni_deadline="2026-01-01", application=self.app)
+
+    def test_it_rewrites_scalars_and_satellites(self):
+        from django.http import QueryDict
+        from home.intake import apply_professor_edits
+        post = QueryDict(mutable=True)
+        post.update({
+            "name": "Alice Sharma", "strong_points": "Rigorous",
+            "gpa": "3.9", "final_percentage": "", "tentative_ranking": "Top 5%",
+        })
+        post.setlist("uni_name", ["MIT", "Stanford"])
+        post.setlist("uni_country", ["USA", "USA"])
+        post.setlist("uni_program", ["MS", "MS"])
+        post.setlist("uni_deadline", ["2026-12-01", "2026-11-01"])
+        post.setlist("subject_names", ["DBMS", "OS"])
+        apply_professor_edits(self.app, post)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.name, "Alice Sharma")
+        self.assertEqual(self.app.subjects, "DBMS,OS")
+        self.assertEqual(University.objects.filter(application=self.app).count(), 2)
+        self.assertFalse(University.objects.filter(uni_name="OLD").exists())
+        self.assertEqual(Academics.objects.get(application=self.app).gpa, "3.9")

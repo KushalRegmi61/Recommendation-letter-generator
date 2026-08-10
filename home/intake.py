@@ -75,3 +75,73 @@ def save_universities(application, rows):
         )
         created += 1
     return created
+
+
+def apply_professor_edits(application, post):
+    """Persist professor edits to a student's application + satellites.
+
+    ``post`` is a QueryDict from the (professor-authenticated, already-scoped)
+    edit form. Scalar Application fields, universities, academics, and the
+    single paper/project rows are rewritten to match it. Satellite rewrites
+    run inside one transaction so a mid-way failure cannot strand a row. The
+    caller is responsible for the GPA-or-percentage check and for the
+    Qualities/anecdote/template handling (kept in ``renderCustom``).
+    """
+    from django.db import transaction
+    from home.models import Academics, Paper, Project, University  # noqa: F401
+
+    with transaction.atomic():
+        application.name = post.get("name") or application.name
+        application.email = post.get("email") or application.email
+        application.years_taught = post.get("yrs")
+        application.subjects = ",".join(post.getlist("subject_names"))
+        application.relationship_type = post.get("relationship_type")
+        application.applied_level = post.get("applied_level")
+        application.recommendation_purpose = post.get("recommendation_purpose")
+        application.personal_statement = post.get("personal_statement")
+        application.linkedIn = post.get("linkedIn")
+        application.strong_points = post.get("strong_points")
+        application.weak_points = post.get("weak_points")
+        application.intern_company = post.get("intern_company")
+        application.intern_role = post.get("intern_role")
+        application.intern_duration = post.get("intern_duration")
+        application.intern_outcome = post.get("intern_outcome")
+        application.scholarships = post.get("scholarships")
+        application.competitions_won = post.get("competitions_won")
+        application.class_size = post.get("class_size") or None
+        application.ranking_percentile = post.get("ranking_percentile")
+        application.language_instruction = post.get("language_instruction")
+        application.save()
+
+        rows = parse_universities(
+            names=post.getlist("uni_name"),
+            countries=post.getlist("uni_country"),
+            deadlines=post.getlist("uni_deadline"),
+            programs=post.getlist("uni_program"),
+        )
+        save_universities(application, rows)
+
+        Academics.objects.filter(application=application).delete()
+        Academics.objects.create(
+            application=application,
+            gpa=post.get("gpa"),
+            tentative_ranking=post.get("tentative_ranking"),
+            final_percentage=post.get("final_percentage"),
+        )
+
+        Paper.objects.filter(application=application).delete()
+        if post.get("paper_title") or post.get("paper_link"):
+            Paper.objects.create(
+                application=application,
+                paper_title=post.get("paper_title"),
+                paper_link=post.get("paper_link"),
+            )
+
+        Project.objects.filter(application=application).delete()
+        if post.get("sproject") or post.get("pro1"):
+            Project.objects.create(
+                application=application,
+                supervised_project=post.get("sproject"),
+                final_project=post.get("pro1"),
+                deployed=post.get("deploy") == "on",
+            )
