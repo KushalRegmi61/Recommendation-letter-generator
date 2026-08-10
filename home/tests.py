@@ -279,6 +279,39 @@ class Studentform1PostTests(TestCase):
         self.assertFalse(app.is_generated)
 
 
+class StudentForm1PrefillTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.other = StudentLoginInfo.objects.create(
+            username="bob", roll_number="075BCT002",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice",
+            strong_points="Diligent", is_generated=False,
+        )
+
+    def test_get_prefills_from_own_inprogress_application(self):
+        login_as_student(self.client, self.student)
+        resp = self.client.get("/studentform1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["application"].strong_points, "Diligent")
+
+    def test_get_does_not_prefill_another_students_application(self):
+        login_as_student(self.client, self.other)
+        resp = self.client.get("/studentform1")
+        self.assertIsNone(resp.context.get("application"))
+
+
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class Studentform2PostTests(TestCase):
     def setUp(self):

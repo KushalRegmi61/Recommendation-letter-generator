@@ -675,18 +675,36 @@ def studentform1(request):
     if request.method == "GET":
         student = current_student(request)
         if student is not None:
-            naam = student.username
             teachers = TeacherInfo.objects.filter(department=student.department)
-            response =  render(
-                    request,
-                    "Studentform1.html",
-                    {
-                        "naam": student.username,
-                        "teachers": teachers,
-                        "roll": student.roll_number,
-                    },
-                )
-            return response
+            # Resume support (Back button from step 2): pre-fill from this
+            # student's own most recent not-yet-generated application. Scoped
+            # via ``current_student`` — never trust a roll/name from the query.
+            application = (
+                Application.objects.filter(std=student, is_generated=False)
+                .order_by("-id")
+                .first()
+            )
+            project = paper = None
+            selected_subjects = []
+            if application is not None:
+                project = Project.objects.filter(application=application).first()
+                paper = Paper.objects.filter(application=application).first()
+                selected_subjects = [
+                    s.strip() for s in (application.subjects or "").split(",") if s.strip()
+                ]
+            return render(
+                request,
+                "Studentform1.html",
+                {
+                    "naam": student.username,
+                    "teachers": teachers,
+                    "roll": student.roll_number,
+                    "application": application,
+                    "project": project,
+                    "paper": paper,
+                    "selected_subjects": selected_subjects,
+                },
+            )
         # user = request.COOKIES.get('username')
 
 

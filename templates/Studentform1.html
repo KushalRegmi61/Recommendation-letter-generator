@@ -24,22 +24,22 @@
           <!-- FR-2: Personal Info -->
           <div class="input-box">
             <span class="details">First Name *</span>
-            <input type="text" placeholder="First Name" name="first_name" required>
+            <input type="text" placeholder="First Name" name="first_name" value="{{ application.first_name|default:'' }}" required>
           </div>
 
           <div class="input-box">
             <span class="details">Middle Name</span>
-            <input type="text" placeholder="Middle Name" name="middle_name">
+            <input type="text" placeholder="Middle Name" name="middle_name" value="{{ application.middle_name|default:'' }}">
           </div>
 
           <div class="input-box">
             <span class="details">Last Name *</span>
-            <input type="text" placeholder="Last Name" name="last_name" required>
+            <input type="text" placeholder="Last Name" name="last_name" value="{{ application.last_name|default:'' }}" required>
           </div>
 
           <div class="input-box">
             <span class="details">Contact Number *</span>
-            <input type="tel" placeholder="e.g. 9800000000" name="contact_number" required>
+            <input type="tel" placeholder="e.g. 9800000000" name="contact_number" value="{{ application.contact_number|default:'' }}" required>
           </div>
 
           <div class="input-box">
@@ -52,7 +52,7 @@
              <select name="prof" id="teacher" required>
                <option>---</option>
                {% for teacher in teachers %}
-               <option value="{{teacher.unique_id}}">{{teacher.name}}</option>
+               <option value="{{teacher.unique_id}}" {% if application.professor.unique_id == teacher.unique_id %}selected{% endif %}>{{teacher.name}}</option>
                {% endfor %}
              </select>
            </div>
@@ -134,7 +134,7 @@
 
           <div class="input-box">
             <span class="details">Final Year Project: *</span>
-            <input type="text" name="sproject" required>
+            <input type="text" name="sproject" value="{{ project.supervised_project|default:'' }}" required>
           </div>
 
           <div class="input-box">
@@ -147,7 +147,7 @@
           
           <div class="input-box">
             <span class="details">Other Project Name(if supervised):</span>
-            <input type="text" name="pro1">
+            <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
           </div>
 
           <div class="input-box">
@@ -161,18 +161,18 @@
 
           <div class="input-box">
             <span class="details">Link for paper (if published):</span>
-            <input type="text" name="paper_link">
+            <input type="text" name="paper_link" value="{{ paper.paper_link|default:'' }}">
           </div>
 
           <div class="input-box">
             <span class="details">Paper Title (if published):</span>
-            <input type="text" name="paper_title">
+            <input type="text" name="paper_title" value="{{ paper.paper_title|default:'' }}">
           </div>
 
           <!-- LinkedIn Link -->
           <div class="input-box">
             <span class="details">LinkedIn Profile Link:</span>
-            <input type="url" placeholder="Enter LinkedIn Profile Link" name="linkedIn" />
+            <input type="url" placeholder="Enter LinkedIn Profile Link" name="linkedIn" value="{{ application.linkedIn|default:'' }}" />
           </div>
 
           <div class="gender-details">
@@ -214,17 +214,17 @@
           <!-- FR-2: Professional background and qualities -->
           <div class="input-box">
             <span class="details">Professional Experience</span>
-            <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc."></textarea>
+            <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc.">{{ application.professional_experience|default:'' }}</textarea>
           </div>
 
           <div class="input-box">
             <span class="details">Strong Points *</span>
-            <textarea name="strong_points" rows="3" placeholder="What are your key strengths?" required></textarea>
+            <textarea name="strong_points" rows="3" placeholder="What are your key strengths?" required>{{ application.strong_points|default:'' }}</textarea>
           </div>
 
           <div class="input-box">
             <span class="details">Weak Points *</span>
-            <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required></textarea>
+            <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required>{{ application.weak_points|default:'' }}</textarea>
           </div>
 
           <!-- Personal Statement -->
@@ -240,7 +240,7 @@
           </style>
           <div class="input-box">
             <span class="details">Personal Statement </span>
-            <textarea name="personal_statement" rows="5" ></textarea>
+            <textarea name="personal_statement" rows="5" >{{ application.personal_statement|default:'' }}</textarea>
           </div>
           
           
@@ -249,7 +249,7 @@
           
           <div class="input-box" >
             <span class="details">Recommendation Purpose </span>
-            <textarea name="recommendation_purpose" rows="5"></textarea>
+            <textarea name="recommendation_purpose" rows="5">{{ application.recommendation_purpose|default:'' }}</textarea>
           </div>
           
           <!-- awards and academic context -->
@@ -307,6 +307,9 @@
 
   <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
   <script>
+      var selectedSubjects = [
+        {% for s in selected_subjects %}"{{ s|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}
+      ];
       $(document).ready(function(){
           //handle selected teacher
           $('select#teacher').change(function () {
@@ -334,9 +337,11 @@
                                    //append new options returned
                                    $("#one span").remove();
                                    for (var i = result.length - 1; i >= 0; i--) {
-                                 
+
                                      $("#one").append( '<span id="span" class="details" > <input type="checkbox" class="dropdown" name="subject'+[i]+'"  value="'+result[i].subject_name +'">' + result[i].subject_name+' </span>'  );//appending on the select
-                                      
+                                     if (selectedSubjects.indexOf(result[i].subject_name) !== -1) {
+                                         $("#one span:last input.dropdown").prop("checked", true);
+                                     }
 
                                   };
                                }
