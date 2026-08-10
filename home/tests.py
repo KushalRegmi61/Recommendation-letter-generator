@@ -3381,9 +3381,18 @@ class AddSubjectsTests(TestCase):
         self.teacher.refresh_from_db()
         self.assertIn(self.subject, self.teacher.subjects.all())
 
-    def test_an_unknown_subject_does_not_crash(self):
+    def test_a_free_text_subject_is_created_and_linked(self):
+        # Free-text add (Unit A) now CREATES a brand-new Subject for an
+        # unrecognised name rather than rejecting it. It must not crash, and the
+        # new row must exist and be linked to the teacher.
         response = self.client.post("/addSubjects", {"subject": "No Such Subject"})
         self.assertIn(response.status_code, (200, 302))
+        self.assertTrue(Subject.objects.filter(sub_name="No Such Subject").exists())
+        self.teacher.refresh_from_db()
+        self.assertIn(
+            "No Such Subject",
+            [s.sub_name for s in self.teacher.subjects.all()],
+        )
 
     def test_an_anonymous_request_cannot_add_a_subject(self):
         self.client.logout()
@@ -3430,6 +3439,16 @@ class SelfAddSubjectTests(TestCase):
     def test_delete_unknown_subject_does_not_500(self):
         resp = self.client.post("/deleteSubjects", {"subject": "Nonexistent"})
         self.assertEqual(resp.status_code, 302)
+
+    def test_adding_the_same_subject_twice_is_a_noop(self):
+        self.client.post("/addSubjects", {"subject": "Compiler Design"})
+        self.client.post("/addSubjects", {"subject": "Compiler Design"})
+        self.assertEqual(
+            self.teacher.subjects.filter(sub_name="Compiler Design").count(), 1
+        )
+        self.assertEqual(
+            Subject.objects.filter(sub_name__iexact="compiler design").count(), 1
+        )
 
 
 class PasswordResetSecurityTests(TestCase):
