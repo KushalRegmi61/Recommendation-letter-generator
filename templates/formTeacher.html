@@ -33,8 +33,6 @@
 
 <form method="POST" id="recommendationForm" action="/renderCustom">
   {% csrf_token %}
-  {# Marks this as a professor edit submission so renderCustom persists the
-     edits + enforces GPA-or-%. Minimal preview POSTs elsewhere omit it. #}
   <input type="hidden" name="prof_edit" value="1">
   <input type="hidden" value="{{ roll }}" name="roll" readonly>
 <div class="gen">
