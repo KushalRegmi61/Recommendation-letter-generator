@@ -1538,13 +1538,18 @@ def renderCustom(request):
 
     from home.intake import academics_present, apply_professor_edits
 
-    # The professor edits the student's data inline before generating. Enforce
-    # the same "GPA or percentage" rule the student form uses, then persist.
-    if not academics_present(request.POST.get("gpa"), request.POST.get("final_percentage")):
-        messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
-        return redirect("/teacher")
-    apply_professor_edits(application, request.POST)
-    application.refresh_from_db()
+    # Only the professor edit form (formTeacher) carries ``prof_edit`` and the
+    # full application payload. Other callers of this preview endpoint send a
+    # minimal payload and must not be forced through the edit/validation path
+    # (which would reject them for a missing GPA and wipe their satellites).
+    if request.POST.get("prof_edit"):
+        # Enforce the same "GPA or percentage" rule the student form uses, then
+        # persist the professor's inline edits before previewing. Reject before
+        # saving anything so a bad edit leaves the record untouched.
+        if not academics_present(request.POST.get("gpa"), request.POST.get("final_percentage")):
+            messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
+            return redirect("/teacher")
+        apply_professor_edits(application, request.POST)
 
     anecdote = request.POST.get("prof_anecdote")
     if anecdote is not None:
@@ -1553,19 +1558,23 @@ def renderCustom(request):
 
     # ``update_or_create`` rather than ``filter().update()``: an application with
     # no Qualities row would silently discard everything the professor ticked.
+    quality_defaults = {
+        "leadership": request.POST.get("quality1") == "on",
+        "hardworking": request.POST.get("quality2") == "on",
+        "social": request.POST.get("quality3") == "on",
+        "teamwork": request.POST.get("quality4") == "on",
+        "friendly": request.POST.get("quality5") == "on",
+        "quality": request.POST.get("qual"),
+        "presentation": request.POST.get("presentation"),
+        "recommend": request.POST.get("recommend"),
+    }
+    # ``eca`` only comes from the professor edit form. Don't wipe a stored value
+    # on a minimal preview POST that never carried the field.
+    if "eca" in request.POST:
+        quality_defaults["extracirricular"] = request.POST.get("eca")
     Qualities.objects.update_or_create(
         application=application,
-        defaults={
-            "leadership": request.POST.get("quality1") == "on",
-            "hardworking": request.POST.get("quality2") == "on",
-            "social": request.POST.get("quality3") == "on",
-            "teamwork": request.POST.get("quality4") == "on",
-            "friendly": request.POST.get("quality5") == "on",
-            "quality": request.POST.get("qual"),
-            "presentation": request.POST.get("presentation"),
-            "recommend": request.POST.get("recommend"),
-            "extracirricular": request.POST.get("eca"),
-        },
+        defaults=quality_defaults,
     )
 
     template_obj = select_template(application.professor, request.POST.get("template_id"))

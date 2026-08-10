@@ -33,6 +33,9 @@
 
 <form method="POST" id="recommendationForm" action="/renderCustom">
   {% csrf_token %}
+  {# Marks this as a professor edit submission so renderCustom persists the
+     edits + enforces GPA-or-%. Minimal preview POSTs elsewhere omit it. #}
+  <input type="hidden" name="prof_edit" value="1">
   <input type="hidden" value="{{ roll }}" name="roll" readonly>
 <div class="gen">
   <div class="gen-head">
@@ -79,6 +82,7 @@
       <div class="field-full mt-2">
         <label>Subjects taught</label>
         {% for s in teacher_model.subjects.all %}
+        {% if forloop.first %}<input type="hidden" name="subjects_editable" value="1">{% endif %}
         <label style="display:inline-block;margin-right:12px;font-weight:400;color:#1c2027;">
           <input type="checkbox" style="width:auto;" name="subject_names" value="{{ s.sub_name }}"
                  {% if s.sub_name in student.subjects %}checked{% endif %}>
@@ -134,6 +138,10 @@
         <label>Other / final project</label>
         <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
       </div>
+      <label style="font-weight:400;color:#1c2027;">
+        <input type="checkbox" style="width:auto;" name="deploy"
+               {% if project.deployed %}checked{% endif %}> Project deployed
+      </label>
     </div>
 
     <div class="surface detail-card">
@@ -259,11 +267,11 @@
       </div>
       <div class="gender-details">
         <span class="gender-title">Personal Qualities</span>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality1" id="q1"><label class="form-check-label" for="q1">Leadership</label></div>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality2" id="q2"><label class="form-check-label" for="q2">Hardworking</label></div>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality3" id="q3"><label class="form-check-label" for="q3">Social</label></div>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality4" id="q4"><label class="form-check-label" for="q4">Teamwork</label></div>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality5" id="q5"><label class="form-check-label" for="q5">Friendly</label></div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality1" id="q1" {% if quality.leadership %}checked{% endif %}><label class="form-check-label" for="q1">Leadership</label></div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality2" id="q2" {% if quality.hardworking %}checked{% endif %}><label class="form-check-label" for="q2">Hardworking</label></div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality3" id="q3" {% if quality.social %}checked{% endif %}><label class="form-check-label" for="q3">Social</label></div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality4" id="q4" {% if quality.teamwork %}checked{% endif %}><label class="form-check-label" for="q4">Teamwork</label></div>
+        <div class="form-check"><input class="form-check-input" type="checkbox" name="quality5" id="q5" {% if quality.friendly %}checked{% endif %}><label class="form-check-label" for="q5">Friendly</label></div>
       </div>
       <div class="input-box">
         <span class="details">Choose Template</span>

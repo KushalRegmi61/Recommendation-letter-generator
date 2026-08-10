@@ -91,10 +91,17 @@ def apply_professor_edits(application, post):
     from home.models import Academics, Paper, Project, University  # noqa: F401
 
     with transaction.atomic():
+        # name/email keep their old value when the field is blank (identity must
+        # not be erased); every other scalar takes the posted value verbatim, so
+        # clearing a field on the edit form clears it on the record.
         application.name = post.get("name") or application.name
         application.email = post.get("email") or application.email
         application.years_taught = post.get("yrs")
-        application.subjects = ",".join(post.getlist("subject_names"))
+        # Only overwrite subjects when the edit form actually rendered the
+        # subject picker (``subjects_editable``). A professor with no subjects on
+        # their own profile submits none, which must NOT wipe the student's list.
+        if post.get("subjects_editable"):
+            application.subjects = ",".join(post.getlist("subject_names"))
         application.relationship_type = post.get("relationship_type")
         application.applied_level = post.get("applied_level")
         application.recommendation_purpose = post.get("recommendation_purpose")
@@ -108,7 +115,10 @@ def apply_professor_edits(application, post):
         application.intern_outcome = post.get("intern_outcome")
         application.scholarships = post.get("scholarships")
         application.competitions_won = post.get("competitions_won")
-        application.class_size = post.get("class_size") or None
+        # HTML type="number" is only a client-side guard; a direct/malformed
+        # POST could send non-digits, which would 500 at save. Coerce safely.
+        class_size = (post.get("class_size") or "").strip()
+        application.class_size = int(class_size) if class_size.isdigit() else None
         application.ranking_percentile = post.get("ranking_percentile")
         application.language_instruction = post.get("language_instruction")
         application.save()

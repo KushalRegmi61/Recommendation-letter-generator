@@ -334,7 +334,7 @@ class Studentform2PostTests(TestCase):
             "roll": "075BAR004", "naam": "eve", "prof_name": "Dr Basnet",
             "uni_name": ["MIT", "ETH"],
             "uni_country": ["USA", "Switzerland"],
-            "uni_deadline": ["2026-12-15", ""],
+            "uni_deadline": ["2026-12-15", "2027-01-20"],
             "uni_program": ["MS CS", "PhD"],
             "gpa": "3.9", "final_percentage": "88", "tentative_ranking": "Top 5%",
             "eca": "Robotics club",
@@ -4231,13 +4231,15 @@ class StudentDetailsPanelTests(TestCase):
         resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
         self.assertNotContains(resp, 'href="javascript:')
 
-    def test_an_http_link_is_still_linkified(self):
+    def test_an_http_link_is_shown_in_the_editable_field(self):
+        # The generation page is now a full editable form (Phase 5): the student's
+        # LinkedIn is rendered as an editable input value, not a clickable link.
         Application.objects.create(
             name="Mina Rai", std=self.student, professor=self.teacher,
             linkedIn="https://linkedin.com/in/mina",
         )
         resp = self.client.post("/makeLetter", {"roll": "080BCT900"})
-        self.assertContains(resp, 'href="https://linkedin.com/in/mina"')
+        self.assertContains(resp, 'name="linkedIn" value="https://linkedin.com/in/mina"')
 
 
 class AcademicsPresentTests(SimpleTestCase):
@@ -4411,6 +4413,7 @@ class ApplyProfessorEditsTests(TestCase):
         post.update({
             "name": "Alice Sharma", "strong_points": "Rigorous",
             "gpa": "3.9", "final_percentage": "", "tentative_ranking": "Top 5%",
+            "subjects_editable": "1",
         })
         post.setlist("uni_name", ["MIT", "Stanford"])
         post.setlist("uni_country", ["USA", "USA"])
@@ -4424,6 +4427,32 @@ class ApplyProfessorEditsTests(TestCase):
         self.assertEqual(University.objects.filter(application=self.app).count(), 2)
         self.assertFalse(University.objects.filter(uni_name="OLD").exists())
         self.assertEqual(Academics.objects.get(application=self.app).gpa, "3.9")
+
+    def test_deployed_round_trips_from_the_deploy_checkbox(self):
+        from django.http import QueryDict
+        from home.intake import apply_professor_edits
+        post = QueryDict(mutable=True)
+        post.update({"gpa": "3.9", "sproject": "Robotics", "deploy": "on"})
+        post.setlist("uni_name", ["MIT"])
+        post.setlist("uni_deadline", ["2026-12-01"])
+        apply_professor_edits(self.app, post)
+        self.assertTrue(Project.objects.get(application=self.app).deployed)
+
+    def test_subjects_are_preserved_when_the_form_omits_the_picker(self):
+        # A professor with no subjects on their profile submits no
+        # subject_names and no subjects_editable marker: the student's stored
+        # subjects must survive rather than being wiped to "".
+        self.app.subjects = "DBMS,OS"
+        self.app.save()
+        from django.http import QueryDict
+        from home.intake import apply_professor_edits
+        post = QueryDict(mutable=True)
+        post.update({"gpa": "3.9"})
+        post.setlist("uni_name", ["MIT"])
+        post.setlist("uni_deadline", ["2026-12-01"])
+        apply_professor_edits(self.app, post)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.subjects, "DBMS,OS")
 
 
 class RenderCustomEditTests(TestCase):
@@ -4452,6 +4481,7 @@ class RenderCustomEditTests(TestCase):
 
     def _edit_post(self, **overrides):
         data = {
+            "prof_edit": "1",
             "roll": "075BCT001", "name": "Alice Sharma",
             "gpa": "3.9", "final_percentage": "", "tentative_ranking": "Top 5%",
             "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
