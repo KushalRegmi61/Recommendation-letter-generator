@@ -3398,6 +3398,40 @@ class AddSubjectsTests(TestCase):
         self.assertNotIn(self.subject, self.teacher.subjects.all())
 
 
+class SelfAddSubjectTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            unique_id="777", name="Dr Rana", email="rana@example.com",
+            department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_a_novel_subject_is_created_and_linked(self):
+        resp = self.client.post("/addSubjects", {"subject": "Compiler Design"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(Subject.objects.filter(sub_name="Compiler Design").exists())
+        self.assertIn(
+            "Compiler Design",
+            [s.sub_name for s in self.teacher.subjects.all()],
+        )
+
+    def test_an_existing_name_is_reused_case_insensitively(self):
+        Subject.objects.create(sub_name="DBMS")
+        self.client.post("/addSubjects", {"subject": "dbms"})
+        self.assertEqual(Subject.objects.filter(sub_name__iexact="dbms").count(), 1)
+        self.assertEqual(self.teacher.subjects.count(), 1)
+
+    def test_blank_subject_is_ignored(self):
+        self.client.post("/addSubjects", {"subject": "   "})
+        self.assertEqual(Subject.objects.count(), 0)
+        self.assertEqual(self.teacher.subjects.count(), 0)
+
+    def test_delete_unknown_subject_does_not_500(self):
+        resp = self.client.post("/deleteSubjects", {"subject": "Nonexistent"})
+        self.assertEqual(resp.status_code, 302)
+
+
 class PasswordResetSecurityTests(TestCase):
     """The unauthenticated password-reset flow must be gated on a
     server-side OTP, not on client-set cookies (the live takeover)."""

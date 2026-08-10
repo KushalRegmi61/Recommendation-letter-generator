@@ -1400,45 +1400,43 @@ def changeEmail(request):
 
 def addSubjects(request):
     if request.method == "POST":
-        subject= request.POST.get("subject")
         # Identity comes from the session, not from a client-set cookie.
         teacher = current_teacher(request)
-        if teacher is not None:
-            # The field is ``sub_name``; ``name`` raised a FieldError (500) on
-            # every call. An unrecognised name is an ordinary user error, not
-            # a crash, so DoesNotExist is reported rather than propagated.
-            try:
-                naya_subject=Subject.objects.get(sub_name=subject)
-            except Subject.DoesNotExist:
-                messages.error(request, "No such Subject exists. ")
-                return redirect(userDetails)
-            # to check if subject is in teacher model or not
-            check=[]
-            subjects=teacher.subjects.all()
-            for i in subjects:
-                check.append(i.sub_name)
-
-            if subject in check:
-                messages.error(request, "Subject already exists.")
-                return redirect(userDetails)
-        
-            else:
-                teacher.subjects.add(naya_subject)
-                messages.success(request, "Subject has been added successfully.")
-                return redirect(userDetails)
-        else:
-            messages.error(request, "No such Subject exists. ")
+        if teacher is None:
+            messages.error(request, "You are not signed in as a professor.")
             return redirect(userDetails)
+
+        name = (request.POST.get("subject") or "").strip()
+        if not name:
+            messages.error(request, "Enter a subject name.")
+            return redirect(userDetails)
+
+        # Free-text, shared pool: reuse an existing row case-insensitively to
+        # curb near-duplicates ("DBMS" vs "dbms"), otherwise create it.
+        subject_obj = Subject.objects.filter(sub_name__iexact=name).first()
+        if subject_obj is None:
+            subject_obj = Subject.objects.create(sub_name=name)
+
+        if teacher.subjects.filter(pk=subject_obj.pk).exists():
+            messages.error(request, "Subject already exists.")
+        else:
+            teacher.subjects.add(subject_obj)
+            messages.success(request, "Subject has been added successfully.")
+        return redirect(userDetails)
 
     return redirect(userDetails)
 
 def deleteSubjects(request):
-   
+
     if request.method == "POST":
         subject= request.POST.get("subject")
         teacher = current_teacher(request)
         if teacher is not None:
-            naya_subject=Subject.objects.get(sub_name=subject)
+            try:
+                naya_subject = Subject.objects.get(sub_name=subject)
+            except Subject.DoesNotExist:
+                messages.error(request, "Subject does not exists.")
+                return redirect(userDetails)
 
             # to check if subject is in teacher model or not
             check=[]
@@ -1446,10 +1444,10 @@ def deleteSubjects(request):
             for i in subjects:
                 check.append(i.sub_name)
             if subject not in check:
-               
+
                 messages.error(request, "Subject does not exists.")
                 return redirect(userDetails)
-        
+
             else:
                 teacher.subjects.remove(naya_subject)
                 messages.success(request, "Subject has been removed successfully.")

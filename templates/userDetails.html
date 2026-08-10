@@ -161,9 +161,16 @@
                       <br>
                       <button  onClick="add_subject()" class="btn btn-primary "  style=" margin:10px;" >Add</button>
                       <button  onClick="delete_subject()" class="btn btn-primary "  style=" margin:10px;" >Delete</button>
-                      
-                  
 
+
+
+                    </form>
+
+                    <form action="/addSubjects" method="POST" style="margin-top:12px;">
+                      {% csrf_token %}
+                      <label>Add a subject you have taught</label>
+                      <input type="text" name="subject" placeholder="e.g. Compiler Design" required>
+                      <button type="submit">Add</button>
                     </form>
                   </div>
                 </div>
