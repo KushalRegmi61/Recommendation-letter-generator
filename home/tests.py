@@ -4424,3 +4424,64 @@ class ApplyProfessorEditsTests(TestCase):
         self.assertEqual(University.objects.filter(application=self.app).count(), 2)
         self.assertFalse(University.objects.filter(uni_name="OLD").exists())
         self.assertEqual(Academics.objects.get(application=self.app).gpa, "3.9")
+
+
+class RenderCustomEditTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.other = TeacherInfo.objects.create(
+            unique_id="99999", name="Dr Other", email="other@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice", is_generated=True,
+        )
+        CustomTemplates.objects.create(
+            template_name="Sys", template="Dear Sir, {{ student.name }}.",
+            is_system=True, is_default=False,
+        )
+
+    def _edit_post(self, **overrides):
+        data = {
+            "roll": "075BCT001", "name": "Alice Sharma",
+            "gpa": "3.9", "final_percentage": "", "tentative_ranking": "Top 5%",
+            "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
+            "uni_deadline": "2026-12-01", "template_id": "",
+        }
+        data.update(overrides)
+        return self.client.post("/renderCustom", data)
+
+    def test_edits_are_persisted_before_preview(self):
+        login_as_teacher(self.client, self.prof)
+        resp = self._edit_post()
+        self.assertEqual(resp.status_code, 200)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.name, "Alice Sharma")
+
+    def test_both_academics_blank_is_rejected(self):
+        login_as_teacher(self.client, self.prof)
+        resp = self._edit_post(gpa="", final_percentage="")
+        self.assertEqual(resp.status_code, 302)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.name, "Alice")
+
+    def test_a_professor_cannot_edit_anothers_application(self):
+        login_as_teacher(self.client, self.other)
+        resp = self._edit_post()
+        self.assertEqual(resp.status_code, 404)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.name, "Alice")
+
+    def test_get_redirects(self):
+        login_as_teacher(self.client, self.prof)
+        resp = self.client.get("/renderCustom")
+        self.assertEqual(resp.status_code, 302)

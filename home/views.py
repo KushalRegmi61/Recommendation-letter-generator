@@ -1536,6 +1536,16 @@ def renderCustom(request):
         Application, std__roll_number=roll, professor__unique_id=unique
     )
 
+    from home.intake import academics_present, apply_professor_edits
+
+    # The professor edits the student's data inline before generating. Enforce
+    # the same "GPA or percentage" rule the student form uses, then persist.
+    if not academics_present(request.POST.get("gpa"), request.POST.get("final_percentage")):
+        messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
+        return redirect("/teacher")
+    apply_professor_edits(application, request.POST)
+    application.refresh_from_db()
+
     anecdote = request.POST.get("prof_anecdote")
     if anecdote is not None:
         application.prof_anecdote = anecdote
@@ -1554,6 +1564,7 @@ def renderCustom(request):
             "quality": request.POST.get("qual"),
             "presentation": request.POST.get("presentation"),
             "recommend": request.POST.get("recommend"),
+            "extracirricular": request.POST.get("eca"),
         },
     )
 
