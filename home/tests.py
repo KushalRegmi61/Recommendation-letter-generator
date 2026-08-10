@@ -4259,3 +4259,66 @@ class StudentForm2AcademicsTests(TestCase):
     def test_percentage_only_saves(self):
         self._post(gpa="", final_percentage="82.5")
         self.assertTrue(Academics.objects.filter(application=self.app).exists())
+
+
+class DeadlineFilterSortTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.early = self._app("early", "075BCT001", "2026-09-01")
+        self.late = self._app("late", "075BCT002", "2026-12-31")
+        self.none = self._app("none", "075BCT003", None)
+
+    def _app(self, uname, roll, deadline):
+        student = StudentLoginInfo.objects.create(
+            username=uname, roll_number=roll,
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        app = Application.objects.create(std=student, professor=self.prof, name=uname)
+        University.objects.create(
+            uni_name="U", country="USA", uni_deadline=deadline, application=app,
+        )
+        return app
+
+    def test_deadline_before_excludes_later_and_null(self):
+        scoped = Application.objects.filter(professor=self.prof)
+        result = apply_application_filters(scoped, {"deadline": "2026-10-01"})
+        names = {a.name for a in result}
+        self.assertEqual(names, {"early"})
+
+    def test_sort_by_deadline_puts_nulls_last(self):
+        ctx = build_teacher_dashboard_context("12345", {"sort": "deadline"})
+        pending_names = [a.name for a in ctx["student_list"]]
+        self.assertEqual(pending_names[:2], ["early", "late"])
+        self.assertEqual(pending_names[-1], "none")
+
+
+class StudentDeadlineRequiredTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="alice", roll_number="075BCT001",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="12345", name="Dr Smith", email="smith@example.com",
+            department=self.dept,
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.prof, name="Alice",
+        )
+
+    def test_blank_deadline_is_rejected(self):
+        self.client.post("/studentform2", {
+            "roll": "075BCT001", "naam": "alice", "prof_name": "Dr Smith",
+            "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
+            "uni_deadline": "",
+            "gpa": "3.8", "final_percentage": "", "tentative_ranking": "Top 5%",
+            "eca": "Robotics",
+        })
+        self.assertFalse(University.objects.filter(application=self.app).exists())

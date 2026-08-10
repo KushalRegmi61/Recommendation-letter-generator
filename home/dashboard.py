@@ -18,17 +18,27 @@ def build_teacher_dashboard_context(unique_id, params):
     the generated list so the two views of the dashboard stay consistent.
     """
     from home.models import Application, TeacherInfo
+    from django.db.models import F, Min
 
     teacher_model = TeacherInfo.objects.get(unique_id=unique_id)
     scoped = Application.objects.filter(professor__unique_id=unique_id)
 
-    # Options come from the UNFILTERED set, so selecting one filter never
-    # empties the other dropdowns.
     options = filter_options(scoped)
 
     filtered = apply_application_filters(scoped, params)
+    # The nearest (earliest) university deadline is the application's urgency;
+    # deadlines live on the University satellite, so annotate the minimum.
+    filtered = filtered.annotate(nearest_deadline=Min("university__uni_deadline"))
+
     pending = filtered.filter(is_generated=False)
     generated = filtered.filter(is_generated=True).order_by("-generated_at", "-id")
+
+    if (params.get("sort") or "").strip() == "deadline":
+        # Nulls last: an application with no deadline has no urgency and sorts
+        # after every dated one.
+        order = F("nearest_deadline").asc(nulls_last=True)
+        pending = pending.order_by(order)
+        generated = generated.order_by(order)
 
     active_filters = {key: (params.get(key) or "").strip() for key in FILTER_PARAMS}
 
@@ -45,4 +55,5 @@ def build_teacher_dashboard_context(unique_id, params):
         "active_filters": active_filters,
         "filters_active": any(active_filters.values()),
         "generated_count": generated.count(),
+        "sort": (params.get("sort") or "").strip(),
     }

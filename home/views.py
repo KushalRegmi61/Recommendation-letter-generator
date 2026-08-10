@@ -783,6 +783,12 @@ def studentform2(request):
             deadlines=request.POST.getlist("uni_deadline"),
             programs=request.POST.getlist("uni_program"),
         )
+        if not uni_rows or any(r["uni_deadline"] is None for r in uni_rows):
+            messages.error(request, "Each university needs a deadline.")
+            return render(request, "student_success.html", {
+                "roll": uroll, "letter": False, "naam": naam,
+                "error": "Each university needs a deadline.",
+            })
         aca_gpa = request.POST.get("gpa")
         aca_ranking = request.POST.get("tentative_ranking")
         final_percentage = request.POST.get("final_percentage")

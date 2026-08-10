@@ -8,7 +8,7 @@ GET parameters.
 from django.db.models import Q
 
 #: GET parameter names the dashboard understands.
-FILTER_PARAMS = ("department", "country", "college", "q")
+FILTER_PARAMS = ("department", "country", "college", "q", "deadline")
 
 #: Fields the free-text box searches. Student identity only — university
 #: name/country are covered by the dropdowns.
@@ -44,6 +44,13 @@ def apply_application_filters(queryset, params):
     if college:
         queryset = queryset.filter(university__uni_name__icontains=college)
 
+    deadline = (params.get("deadline") or "").strip()
+    if deadline:
+        # "Show me who needs a letter before this date": match applications
+        # with a university deadline on or before it. Null deadlines are
+        # excluded (they carry no urgency signal).
+        queryset = queryset.filter(university__uni_deadline__lte=deadline)
+
     search = (params.get("q") or "").strip()
     if search:
         # Each whitespace-separated term must match SOME field (AND of ORs), so
@@ -55,7 +62,7 @@ def apply_application_filters(queryset, params):
                 matches |= Q(**{f"{field}__icontains": term})
             queryset = queryset.filter(matches)
 
-    if country or college:
+    if country or college or deadline:
         # ``university`` is a to-many join: without distinct() an application
         # with two matching universities would appear twice.
         queryset = queryset.distinct()

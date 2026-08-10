@@ -91,6 +91,18 @@
           {% endfor %}
         </datalist>
       </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-deadline" class="form-label">Deadline before</label>
+        <input class="form-control" id="filter-deadline" type="date" name="deadline"
+               value="{{ active_filters.deadline }}">
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <label for="filter-sort" class="form-label">Sort</label>
+        <select class="form-control" id="filter-sort" name="sort">
+          <option value="" {% if not sort %}selected{% endif %}>Default</option>
+          <option value="deadline" {% if sort == 'deadline' %}selected{% endif %}>Nearest deadline</option>
+        </select>
+      </div>
       <div class="col-12 mt-3">
         <button class="btn btn-primary" type="submit"><i class="bi bi-funnel"></i> Filter</button>
         {% if filters_active %}
@@ -147,6 +159,7 @@
             <th>Email</th>
             <th>Generated on</th>
             <th>Template</th>
+            <th>Deadline</th>
             <th>Letter</th>
           </tr>
         </thead>
@@ -157,6 +170,7 @@
             <td>{{ item.email }}</td>
             <td>{% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}—{% endif %}</td>
             <td>{% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}—{% endif %}</td>
+            <td>{% if item.nearest_deadline %}{{ item.nearest_deadline|date:"d M Y" }}{% else %}—{% endif %}</td>
             <td>
               <div class="action-row">
                 <form action='/studentfinal' method='POST' class="action-row">
@@ -180,7 +194,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="5">
+            <td colspan="6">
               <div class="empty-state" style="border:none; background:transparent; padding:22px 8px;">
                 You haven't generated any recommendation letters yet.
               </div>
