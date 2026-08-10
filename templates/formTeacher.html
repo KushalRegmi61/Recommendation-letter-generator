@@ -14,9 +14,13 @@
   .detail-card { padding: 16px 18px; }
   .detail-card h3 { font-size: .95rem; font-weight: 650; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
   .detail-card h3 i { color: #33429e; }
-  .kv { display: grid; grid-template-columns: 42% 58%; gap: 6px 10px; margin: 0; }
+  .kv { display: grid; grid-template-columns: 42% 58%; gap: 6px 10px; margin: 0; align-items: center; }
   .kv dt { color: #667085; font-size: .85rem; font-weight: 500; }
   .kv dd { margin: 0; font-size: .9rem; color: #1c2027; word-break: break-word; }
+  .detail-card input, .detail-card textarea, .detail-card select { width: 100%; padding: 6px 8px; border: 1px solid #d0d5dd; border-radius: 6px; font-size: .88rem; box-sizing: border-box; }
+  .field-full { margin-bottom: 10px; }
+  .field-full > label { display: block; color: #667085; font-size: .85rem; font-weight: 500; margin-bottom: 4px; }
+  .uni-row input { flex: 1 1 140px; }
   .badges { display: flex; flex-wrap: wrap; gap: 6px; }
   .badge-q { background: #eef1fb; color: #33429e; border-radius: 999px; padding: 2px 10px; font-size: .8rem; font-weight: 600; }
   .doc-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -27,105 +31,132 @@
   .gen-form-card .gender-title { font-weight: 600; display: block; margin: 8px 0; }
 </style>
 
+<form method="POST" id="recommendationForm" action="/renderCustom">
+  {% csrf_token %}
+  <input type="hidden" value="{{ roll }}" name="roll" readonly>
 <div class="gen">
   <div class="gen-head">
     {% if files.Photo %}<img src="{{ files.Photo.url }}" alt="{{ student.name }}">{% endif %}
     <div class="who">
       <h1>{{ student.name }}</h1>
-      <p>Submitted application — review before generating the letter</p>
+      <p>Submitted application — edit any field before generating the letter</p>
     </div>
   </div>
 
-  <div class="section-label">Student's submitted application</div>
+  <div class="section-label">Student's submitted application (editable)</div>
   <div class="detail-grid">
 
     <div class="surface detail-card">
       <h3><i class="bi bi-person"></i> Student</h3>
       <dl class="kv">
-        <dt>Full name</dt><dd>{{ student.name|default:"—" }}</dd>
-        <dt>Email</dt><dd>{{ student.email|default:"—" }}</dd>
+        <dt>Full name</dt><dd><input type="text" name="name" value="{{ student.name|default:'' }}"></dd>
+        <dt>Email</dt><dd><input type="text" name="email" value="{{ student.email|default:'' }}"></dd>
         <dt>Contact</dt><dd>{{ student.contact_number|default:"—" }}</dd>
-        <dt>Applied level</dt><dd>{{ student.applied_level|default:"—" }}</dd>
-        <dt>LinkedIn</dt><dd>{% with lu=linkedin|safe_external_url %}{% if lu %}<a href="{{ lu }}" target="_blank" rel="noopener noreferrer">{{ linkedin }}</a>{% elif linkedin %}{{ linkedin }}{% else %}—{% endif %}{% endwith %}</dd>
+        <dt>Applied level</dt><dd><input type="text" name="applied_level" value="{{ student.applied_level|default:'' }}"></dd>
+        <dt>LinkedIn</dt><dd><input type="text" name="linkedIn" value="{{ linkedin|default:'' }}"></dd>
       </dl>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-mortarboard"></i> Academic</h3>
       <dl class="kv">
-        <dt>GPA</dt><dd>{{ academics.gpa|default:"—" }}</dd>
-        <dt>Tentative ranking</dt><dd>{{ academics.tentative_ranking|default:"—" }}</dd>
-        <dt>Final %</dt><dd>{{ academics.final_percentage|default:"—" }}</dd>
-        <dt>Class size</dt><dd>{{ student.class_size|default:"—" }}</dd>
-        <dt>Ranking percentile</dt><dd>{{ student.ranking_percentile|default:"—" }}</dd>
-        <dt>Enrollment batch</dt><dd>{{ student.enrollment_batch|default:"—" }}</dd>
-        <dt>Passed year</dt><dd>{{ student.passed_year|default:"—" }}</dd>
-        <dt>Language</dt><dd>{{ student.language_instruction|default:"—" }}</dd>
+        <dt>GPA</dt><dd><input type="text" name="gpa" value="{{ academics.gpa|default:'' }}"></dd>
+        <dt>Tentative ranking</dt><dd><input type="text" name="tentative_ranking" value="{{ academics.tentative_ranking|default:'' }}"></dd>
+        <dt>Final %</dt><dd><input type="text" name="final_percentage" value="{{ academics.final_percentage|default:'' }}"></dd>
+        <dt>Class size</dt><dd><input type="number" name="class_size" value="{{ student.class_size|default:'' }}"></dd>
+        <dt>Ranking percentile</dt><dd><input type="text" name="ranking_percentile" value="{{ student.ranking_percentile|default:'' }}"></dd>
+        <dt>Language</dt><dd><input type="text" name="language_instruction" value="{{ student.language_instruction|default:'' }}"></dd>
       </dl>
+      <p class="text-muted mb-0 mt-2" style="font-size:.78rem;">Enter a GPA or a final percentage — at least one is required.</p>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-people"></i> Relationship with you</h3>
       <dl class="kv">
-        <dt>Years known/taught</dt><dd>{{ student.years_taught|default:student.years_known|default:"—" }}</dd>
-        <dt>Relationship</dt><dd>{{ student.relationship_type|default:"—" }}</dd>
-        <dt>Known roles</dt><dd>{{ student.known_roles|default:"—" }}</dd>
-        <dt>Subjects taught</dt><dd>{{ student.subjects|default:"—" }}</dd>
-        <dt>Prof. experience</dt><dd>{{ student.professional_experience|default:"—" }}</dd>
+        <dt>Years known/taught</dt><dd><input type="text" name="yrs" value="{{ student.years_taught|default:'' }}"></dd>
+        <dt>Relationship</dt><dd><input type="text" name="relationship_type" value="{{ student.relationship_type|default:'' }}"></dd>
       </dl>
+      <div class="field-full mt-2">
+        <label>Subjects taught</label>
+        {% for s in teacher_model.subjects.all %}
+        <label style="display:inline-block;margin-right:12px;font-weight:400;color:#1c2027;">
+          <input type="checkbox" style="width:auto;" name="subject_names" value="{{ s.sub_name }}"
+                 {% if s.sub_name in student.subjects %}checked{% endif %}>
+          {{ s.sub_name }}
+        </label>
+        {% empty %}<span class="text-muted">No subjects on your profile.</span>{% endfor %}
+      </div>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-building"></i> Universities applied</h3>
-      {% for u in universities %}
-      <dl class="kv" {% if not forloop.first %}style="margin-top:10px;border-top:1px solid #eef0f3;padding-top:10px;"{% endif %}>
-        <dt>Name</dt><dd>{{ u.uni_name|default:"—" }}</dd>
-        <dt>Country</dt><dd>{{ u.country|default:"—" }}</dd>
-        <dt>Program</dt><dd>{{ u.program_applied|default:"—" }}</dd>
-        <dt>Deadline</dt><dd>{{ u.uni_deadline|default:"—" }}</dd>
-      </dl>
-      {% empty %}<p class="text-muted mb-0">—</p>{% endfor %}
+      <div id="prof-universities">
+        {% for u in universities %}
+        <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <input type="text" name="uni_name" value="{{ u.uni_name|default:'' }}" placeholder="University name" required>
+          <input type="text" name="uni_country" value="{{ u.country|default:'' }}" placeholder="Country">
+          <input type="text" name="uni_program" value="{{ u.program_applied|default:'' }}" placeholder="Program">
+          <input type="date" name="uni_deadline" value="{{ u.uni_deadline|date:'Y-m-d' }}" required>
+          <button type="button" class="remove-uni btn btn-sm btn-outline-danger">Remove</button>
+        </div>
+        {% empty %}
+        <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <input type="text" name="uni_name" placeholder="University name" required>
+          <input type="text" name="uni_country" placeholder="Country">
+          <input type="text" name="uni_program" placeholder="Program">
+          <input type="date" name="uni_deadline" required>
+          <button type="button" class="remove-uni btn btn-sm btn-outline-danger">Remove</button>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" id="prof-add-uni" class="btn btn-sm btn-outline-primary">+ Add another university</button>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-journal-text"></i> Research / Papers</h3>
-      {% for p in papers %}{% if p.paper_title or p.paper_link %}
-      <p class="mb-1">{% with pl=p.paper_link|safe_external_url %}{% if pl %}<a href="{{ pl }}" target="_blank" rel="noopener noreferrer">{{ p.paper_title|default:"View paper" }}</a>{% else %}{{ p.paper_title|default:"—" }}{% endif %}{% endwith %}</p>
-      {% endif %}{% empty %}<p class="text-muted mb-0">—</p>{% endfor %}
+      <div class="field-full">
+        <label>Paper title</label>
+        <input type="text" name="paper_title" value="{{ paper.paper_title|default:'' }}">
+      </div>
+      <div class="field-full">
+        <label>Paper link</label>
+        <input type="text" name="paper_link" value="{{ paper.paper_link|default:'' }}">
+      </div>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-kanban"></i> Projects</h3>
-      {% for pr in projects %}
-      <dl class="kv" {% if not forloop.first %}style="margin-top:10px;border-top:1px solid #eef0f3;padding-top:10px;"{% endif %}>
-        <dt>Supervised</dt><dd>{{ pr.supervised_project|default:"—" }}</dd>
-        <dt>Other / final</dt><dd>{{ pr.final_project|default:"—" }}</dd>
-        <dt>Deployed</dt><dd>{% if pr.deployed %}Yes{% else %}No{% endif %}</dd>
-      </dl>
-      {% empty %}<p class="text-muted mb-0">—</p>{% endfor %}
+      <div class="field-full">
+        <label>Supervised project</label>
+        <input type="text" name="sproject" value="{{ project.supervised_project|default:'' }}">
+      </div>
+      <div class="field-full">
+        <label>Other / final project</label>
+        <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
+      </div>
     </div>
 
-    {% if student.intern or student.intern_company or student.intern_role %}
     <div class="surface detail-card">
       <h3><i class="bi bi-briefcase"></i> Internship</h3>
       <dl class="kv">
-        <dt>Company</dt><dd>{{ student.intern_company|default:"—" }}</dd>
-        <dt>Role</dt><dd>{{ student.intern_role|default:"—" }}</dd>
-        <dt>Duration</dt><dd>{{ student.intern_duration|default:"—" }}</dd>
-        <dt>Outcome</dt><dd>{{ student.intern_outcome|default:"—" }}</dd>
+        <dt>Company</dt><dd><input type="text" name="intern_company" value="{{ student.intern_company|default:'' }}"></dd>
+        <dt>Role</dt><dd><input type="text" name="intern_role" value="{{ student.intern_role|default:'' }}"></dd>
+        <dt>Duration</dt><dd><input type="text" name="intern_duration" value="{{ student.intern_duration|default:'' }}"></dd>
+        <dt>Outcome</dt><dd><input type="text" name="intern_outcome" value="{{ student.intern_outcome|default:'' }}"></dd>
       </dl>
     </div>
-    {% endif %}
 
-    {% if student.scholarships or student.competitions_won %}
     <div class="surface detail-card">
       <h3><i class="bi bi-award"></i> Awards &amp; scholarships</h3>
-      <dl class="kv">
-        <dt>Scholarships</dt><dd>{{ student.scholarships|default:"—"|linebreaksbr }}</dd>
-        <dt>Competitions</dt><dd>{{ student.competitions_won|default:"—"|linebreaksbr }}</dd>
-      </dl>
+      <div class="field-full">
+        <label>Scholarships</label>
+        <textarea name="scholarships" rows="3">{{ student.scholarships|default:'' }}</textarea>
+      </div>
+      <div class="field-full">
+        <label>Competitions won</label>
+        <textarea name="competitions_won" rows="3">{{ student.competitions_won|default:'' }}</textarea>
+      </div>
     </div>
-    {% endif %}
 
     <div class="surface detail-card">
       <h3><i class="bi bi-stars"></i> Personal qualities (self-reported)</h3>
@@ -136,22 +167,30 @@
         {% if quality.teamwork %}<span class="badge-q">Teamwork</span>{% endif %}
         {% if quality.friendly %}<span class="badge-q">Friendly</span>{% endif %}
       </div>
-      <dl class="kv">
-        <dt>Presentation</dt><dd>{{ quality.presentation|default:"—" }}</dd>
-        <dt>Recommend</dt><dd>{{ quality.recommend|default:"—" }}</dd>
-        <dt>Strength</dt><dd>{{ quality.recommendation_strength|default:"—" }}</dd>
-        <dt>Extracurricular</dt><dd>{{ quality.extracirricular|default:"—" }}</dd>
-      </dl>
+      <div class="field-full">
+        <label>Extracurricular</label>
+        <textarea name="eca" rows="3">{{ quality.extracirricular|default:'' }}</textarea>
+      </div>
     </div>
 
     <div class="surface detail-card">
       <h3><i class="bi bi-chat-quote"></i> Statements</h3>
-      <dl class="kv">
-        <dt>Personal statement</dt><dd>{{ personal_statement|default:"—"|linebreaksbr }}</dd>
-        <dt>Recommendation purpose</dt><dd>{{ recommendation_purpose|default:"—"|linebreaksbr }}</dd>
-        <dt>Strong points</dt><dd>{{ student.strong_points|default:"—"|linebreaksbr }}</dd>
-        <dt>Weak points</dt><dd>{{ student.weak_points|default:"—"|linebreaksbr }}</dd>
-      </dl>
+      <div class="field-full">
+        <label>Personal statement</label>
+        <textarea name="personal_statement" rows="3">{{ personal_statement|default:'' }}</textarea>
+      </div>
+      <div class="field-full">
+        <label>Recommendation purpose</label>
+        <textarea name="recommendation_purpose" rows="3">{{ recommendation_purpose|default:'' }}</textarea>
+      </div>
+      <div class="field-full">
+        <label>Strong points</label>
+        <textarea name="strong_points" rows="2">{{ student.strong_points|default:'' }}</textarea>
+      </div>
+      <div class="field-full">
+        <label>Weak points</label>
+        <textarea name="weak_points" rows="2">{{ student.weak_points|default:'' }}</textarea>
+      </div>
     </div>
 
     <div class="surface detail-card">
@@ -196,8 +235,6 @@
 
   <div class="section-label">Generate the letter</div>
   <div class="surface gen-form-card">
-    <form method="POST" id="recommendationForm" action="/renderCustom">
-      {% csrf_token %}
       <div class="input-box">
         <span class="details">Presentation skills:</span>
         <select name="presentation" required>
@@ -236,11 +273,25 @@
           {% endfor %}
         </select>
       </div>
-      <input type="hidden" value="{{ roll }}" name="roll" readonly>
       <div class="button mt-3">
         <button class="btn btn-success btn-lg" type="submit"><i class="bi bi-file-earmark-text"></i> Generate letter</button>
       </div>
-    </form>
   </div>
 </div>
+</form>
+
+<script>
+  document.getElementById('prof-add-uni').addEventListener('click', function () {
+    var c = document.getElementById('prof-universities');
+    var clone = c.querySelector('.uni-row').cloneNode(true);
+    clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    c.appendChild(clone);
+  });
+  document.getElementById('prof-universities').addEventListener('click', function (e) {
+    if (e.target.classList.contains('remove-uni')) {
+      var rows = this.querySelectorAll('.uni-row');
+      if (rows.length > 1) e.target.closest('.uni-row').remove();
+    }
+  });
+</script>
 {% endblock body %}
