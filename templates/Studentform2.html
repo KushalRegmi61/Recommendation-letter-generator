@@ -4,6 +4,11 @@
 {% block body %}
   <div class="container">
     <div class="title">Additional Info</div>
+    {% if error %}
+    <div class="error-banner" style="background:#fdecea;color:#b00020;padding:10px 14px;border-radius:5px;margin:10px 0;">
+      {{ error }}
+    </div>
+    {% endif %}
     <div class="content">
       <form method="POST", action="/studentform2" , enctype='multipart/form-data'>
       {% csrf_token %}

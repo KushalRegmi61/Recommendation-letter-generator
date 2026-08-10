@@ -4252,6 +4252,12 @@ class StudentForm2AcademicsTests(TestCase):
         self._post(gpa="", final_percentage="")
         self.assertFalse(Academics.objects.filter(application=self.app).exists())
 
+    def test_rejection_surfaces_the_error(self):
+        # The student must SEE why nothing was saved — not a false success page.
+        resp = self._post(gpa="", final_percentage="")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Enter a GPA or a final percentage")
+
     def test_gpa_only_saves(self):
         self._post(gpa="3.8", final_percentage="")
         self.assertTrue(Academics.objects.filter(application=self.app).exists())
@@ -4313,12 +4319,20 @@ class StudentDeadlineRequiredTests(TestCase):
             std=self.student, professor=self.prof, name="Alice",
         )
 
-    def test_blank_deadline_is_rejected(self):
-        self.client.post("/studentform2", {
+    def _post_blank_deadline(self):
+        return self.client.post("/studentform2", {
             "roll": "075BCT001", "naam": "alice", "prof_name": "Dr Smith",
             "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
             "uni_deadline": "",
             "gpa": "3.8", "final_percentage": "", "tentative_ranking": "Top 5%",
             "eca": "Robotics",
         })
+
+    def test_blank_deadline_is_rejected(self):
+        self._post_blank_deadline()
         self.assertFalse(University.objects.filter(application=self.app).exists())
+
+    def test_rejection_surfaces_the_error(self):
+        resp = self._post_blank_deadline()
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Each university needs a deadline.")

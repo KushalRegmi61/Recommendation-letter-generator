@@ -784,9 +784,12 @@ def studentform2(request):
             programs=request.POST.getlist("uni_program"),
         )
         if not uni_rows or any(r["uni_deadline"] is None for r in uni_rows):
-            messages.error(request, "Each university needs a deadline.")
-            return render(request, "student_success.html", {
-                "roll": uroll, "letter": False, "naam": naam,
+            # Re-render the form itself (which surfaces ``error``), not the
+            # success page: student_success.html has no error slot, so rendering
+            # it made a rejected submission look like a successful one.
+            return render(request, "Studentform2.html", {
+                "roll": uroll, "naam": naam,
+                "prof_name": request.POST.get("prof_name"),
                 "error": "Each university needs a deadline.",
             })
         aca_gpa = request.POST.get("gpa")
@@ -818,10 +821,12 @@ def studentform2(request):
 
         from home.intake import academics_present
         if not academics_present(aca_gpa, final_percentage):
-            messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
-            return render(request, "student_success.html", {
-                "roll": uroll, "letter": False, "naam": naam,
-                "error": "Enter a GPA or a final percentage.",
+            # Re-render the form (see the deadline branch above) so the student
+            # sees why nothing was saved instead of a false success page.
+            return render(request, "Studentform2.html", {
+                "roll": uroll, "naam": naam,
+                "prof_name": request.POST.get("prof_name"),
+                "error": "Enter a GPA or a final percentage — at least one is required.",
             })
 
         info = Application.objects.get(std__username = naam ,professor__name = prof_name )
