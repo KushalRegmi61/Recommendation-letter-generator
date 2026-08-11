@@ -483,422 +483,200 @@ def make_letter(request):
         )
 
 
+def _render_student_form(request, student, error=None):
+    """Render the single-page student application form for ``student``."""
+    teachers = TeacherInfo.objects.filter(department=student.department)
+    return render(request, "Studentform1.html", {
+        "naam": student.username,
+        "roll": student.roll_number,
+        "teachers": teachers,
+        "error": error,
+    })
+
+
 def studentform1(request):
-    if request.method == "POST":
-        naam = request.POST.get("naam")
-        uroll = request.POST.get("roll")
-        uemail = request.POST.get("email")
-        uprof = request.POST.get("prof")
-        known_year = request.POST.get("yrs")
-        relationship_type = request.POST.get("relationship_type")
+    """Single-page student recommendation-letter application.
 
-        # --- FR-2 new intake fields ---
-        first_name = request.POST.get("first_name")
-        middle_name = request.POST.get("middle_name")
-        last_name = request.POST.get("last_name")
-        contact_number = request.POST.get("contact_number")
-        applied_level = request.POST.get("applied_level")
-        known_roles = ",".join(request.POST.getlist("known_roles"))
-        enrollment_batch = request.POST.get("enrollment_batch")
-        passed_year = request.POST.get("passed_year")
-        professional_experience = request.POST.get("professional_experience")
-        strong_points = request.POST.get("strong_points")
-        weak_points = request.POST.get("weak_points")
-        from home.intake import compose_full_name
-        full_name = compose_full_name(first_name, middle_name, last_name) or request.POST.get("naam")
+    Personal details, universities, academics, files and qualities are all
+    submitted together and written in one ``transaction.atomic()`` block, so
+    there is no cross-page state and no Back button to lose data to.
 
-        s_project = request.POST.get("sproject")
-        is_project = request.POST.get("is_project") or "null"
-        
-        pro1 = request.POST.get("pro1")
-        has_paper = request.POST.get("has_paper")
-        title_paper = request.POST.get("paper_title")
-        paperlink = request.POST.get("paper_link")
-        
-        linkedIn_link = request.POST.get("linkedIn")
-        pstatement = request.POST.get('personal_statement')
-        rpurpose = request.POST.get('recommendation_purpose')
-        intern_company = request.POST.get("intern_company")
-        intern_role = request.POST.get("intern_role")
-        intern_duration = request.POST.get("intern_duration")
-        intern_outcome = request.POST.get("intern_outcome")
-        scholarships = request.POST.get("scholarships")
-        competitions_won = request.POST.get("competitions_won")
-        class_size = request.POST.get("class_size")
-        ranking_percentile = request.POST.get("ranking_percentile")
-        language_instruction = request.POST.get("language_instruction")
-        
+    Identity is resolved from the signed session via ``current_student`` — any
+    ``naam``/``roll`` in the request body is ignored, closing the impersonation
+    gap the two-page intake had (a logged-in student could submit under another
+    student's name).
+    """
+    student = current_student(request)
+    if student is None:
+        messages.error(request, "Please login first")
+        return render(request, "loginStudent.html")
 
-        
-        deployed = request.POST.get('deploy')
-        intern = request.POST.get('intern')
+    if request.method != "POST":
+        return _render_student_form(request, student)
 
-    
-        subjects = Subject.objects.all()
-        bisaya = []
-        i = 0
-        for subject in subjects:
-            if request.POST.get("subject" + str(i)) is not None:
-                bisaya.append(request.POST.get("subject" + str(i)))
-            i = i + 1
-        listToStr = ",".join([str(elem) for elem in bisaya])
-        x = uprof.split("|")
-        id = x[-1]
-        if StudentLoginInfo.objects.filter(username=naam).exists():
-            stu = StudentLoginInfo.objects.get(username=naam)
-            teachers = TeacherInfo.objects.filter(department=stu.department)
-            if TeacherInfo.objects.filter(unique_id=id).exists():
-                prof = TeacherInfo.objects.get(unique_id=id)
-                # create or update Application record and persist before using it
-                if Application.objects.filter(std__username=naam, professor__name=prof.name).exists():
-                    info = Application.objects.get(std__username=naam, professor__name=prof.name)
-                    # update fields
-                    info.name = full_name
-                    info.email = uemail
-                    info.professor = prof
-                    info.std = stu
-                    info.is_pro = is_project
-                    info.years_taught = known_year
-                    info.subjects = listToStr
-                    info.is_paper = has_paper
-                    info.intern = True if intern == "on" else False
-                    info.personal_statement = pstatement
-                    info.recommendation_purpose = rpurpose
-                    info.linkedIn = linkedIn_link
-                    info.intern_company = intern_company
-                    info.intern_role = intern_role
-                    info.intern_duration = intern_duration
-                    info.intern_outcome = intern_outcome
-                    info.scholarships = scholarships
-                    info.competitions_won = competitions_won
-                    info.class_size = class_size if class_size else None
-                    info.ranking_percentile = ranking_percentile
-                    info.language_instruction = language_instruction
-                    info.relationship_type = relationship_type
-                    info.first_name = first_name
-                    info.middle_name = middle_name
-                    info.last_name = last_name
-                    info.contact_number = contact_number
-                    info.applied_level = applied_level
-                    info.known_roles = known_roles
-                    info.years_known = known_year
-                    info.enrollment_batch = enrollment_batch
-                    info.passed_year = passed_year
-                    info.professional_experience = professional_experience
-                    info.strong_points = strong_points
-                    info.weak_points = weak_points
-                    info.save()
-                else:
-                    info = Application(
-                        name=full_name,
-                        email=uemail,
-                        professor=prof,
-                        std=stu,
-                        is_pro=is_project,
-                        years_taught=known_year,
-                        subjects=listToStr,
-                        is_paper=has_paper,
-                        intern=True if intern == "on" else False,
-                        personal_statement=pstatement,
-                        recommendation_purpose=rpurpose,
-                        linkedIn=linkedIn_link,
-                        relationship_type=relationship_type,
-                        intern_company=intern_company,
-                        intern_role=intern_role,
-                        intern_duration=intern_duration,
-                        intern_outcome=intern_outcome,
-                        scholarships=scholarships,
-                        competitions_won=competitions_won,
-                        class_size=class_size if class_size else None,
-                        ranking_percentile=ranking_percentile,
-                        language_instruction=language_instruction,
-                        first_name=first_name,
-                        middle_name=middle_name,
-                        last_name=last_name,
-                        contact_number=contact_number,
-                        applied_level=applied_level,
-                        known_roles=known_roles,
-                        years_known=known_year,
-                        enrollment_batch=enrollment_batch,
-                        passed_year=passed_year,
-                        professional_experience=professional_experience,
-                        strong_points=strong_points,
-                        weak_points=weak_points,
-                    )
-                    info.save()
+    from home.intake import (
+        parse_universities, save_universities, academics_present, compose_full_name,
+    )
 
-                # now that 'info' is saved and has a primary key, handle related objects
-                project_info = Project(
-                    supervised_project=s_project,
-                    final_project=pro1,
-                    deployed=True if deployed == "on" else False,
-                    application=info,
-                )
-                if Project.objects.filter(application=info).exists():
-                    project = Project.objects.get(application=info)
-                    project.delete()
+    # --- professor (must be one of the student's department) ---
+    prof_id = (request.POST.get("prof") or "").split("|")[-1]
+    prof = TeacherInfo.objects.filter(unique_id=prof_id).first()
+    if prof is None:
+        return _render_student_form(request, student, "Please select a professor.")
 
-                project_info.save()
-                    
-                
-                paper_info = Paper(
-                    paper_link = paperlink,
-                    paper_title = title_paper,
-                    application = info,
-                )
-                
-                if Paper.objects.filter(application = info).exists():
-                    paper = Paper.objects.get(application=info)
-                    paper.delete()
+    # --- universities: every row needs a deadline ---
+    uni_rows = parse_universities(
+        names=request.POST.getlist("uni_name"),
+        countries=request.POST.getlist("uni_country"),
+        deadlines=request.POST.getlist("uni_deadline"),
+        programs=request.POST.getlist("uni_program"),
+    )
+    if not uni_rows or any(r["uni_deadline"] is None for r in uni_rows):
+        return _render_student_form(request, student, "Each university needs a deadline.")
 
-                paper_info.save()
-            
-            else:
-                messages.error(request, "Please select a professor.")
-                return render(
-                        request,
-                        "Studentform1.html",
-                        {
-                            "naam": stu.username,
-                            "teachers": teachers,
-                            "roll": stu.roll_number,
-                        },
-                    )
-
-            return render(request, "Studentform2.html", {'roll':uroll, 'naam' : naam, 'prof_name': prof.name},)
-
-        else:
-            messages.error(request, "Please login first")
-            return render(request, "loginStudent.html")
-
-    
-    if request.method == "GET":
-        student = current_student(request)
-        if student is not None:
-            teachers = TeacherInfo.objects.filter(department=student.department)
-            # Resume support (Back button from step 2): pre-fill from this
-            # student's own most recent not-yet-generated application. Scoped
-            # via ``current_student`` — never trust a roll/name from the query.
-            application = (
-                Application.objects.filter(std=student, is_generated=False)
-                .order_by("-id")
-                .first()
-            )
-            project = paper = None
-            selected_subjects = []
-            if application is not None:
-                project = Project.objects.filter(application=application).first()
-                paper = Paper.objects.filter(application=application).first()
-                selected_subjects = [
-                    s.strip() for s in (application.subjects or "").split(",") if s.strip()
-                ]
-            return render(
-                request,
-                "Studentform1.html",
-                {
-                    "naam": student.username,
-                    "teachers": teachers,
-                    "roll": student.roll_number,
-                    "application": application,
-                    "project": project,
-                    "paper": paper,
-                    "selected_subjects": selected_subjects,
-                },
-            )
-        # user = request.COOKIES.get('username')
-
-
-    messages.error(request, "Please login first")
-    return render(request, "loginStudent.html")
-
-def studentform2(request):
-    # Define max file size in bytes
-    MAX_CV_SIZE = 5 * 1024 * 1024  # 10MB
-    MAX_TRANSCRIPT_SIZE = 5 * 1024 * 1024  # 10MB
-    MAX_PHOTO_SIZE = 3 * 1024 * 1024  # 3MB
-
-    # if request.method == "POST":
-    #     uroll = request.POST.get("roll")
-    #     naam = request.POST.get("naam")
-    #     prof_name = request.POST.get("prof_name")
-    #     aca_gpa = request.POST.get("gpa")
-    #     aca_ranking = request.POST.get("tentative_ranking")
-    #     file_transcript = request.FILES.get("transcript")
-    #     file_cv = request.FILES.get("cv")
-    #     file_photo = request.FILES.get('photo')
-    #     extra = request.POST.get('extraCurricular')
-
-    #     universities = request.POST.getlist("universities")
-    #     programs_applied = request.POST.getlist("programs_applied")
-    #     deadlines = request.POST.getlist("deadlines")
-
-    #     info = Application.objects.get(std__username=naam, professor__name=prof_name)
-    #     info.is_generated = False
-    #     info.save()
-
-    #     if University.objects.filter(application=info).exists():
-    #         University.objects.filter(application=info).delete()
-
-    #     for i in range(len(universities)):
-    #         uni_info = University(
-    #             uni_name=universities[i],
-    #             uni_deadline=deadlines[i],
-    #             program_applied=programs_applied[i],
-    #             application=info,
-    #         )
-    #         uni_info.save()
-
-    #     if Academics.objects.filter(application=info).exists():
-    #         Academics.objects.filter(application=info).delete()
-
-    #     academics_info = Academics(
-    #         gpa=aca_gpa,
-    #         tentative_ranking=aca_ranking,
-    #         application=info,
-    #     )
-    #     academics_info.save()
-
-    #     if Files.objects.filter(application=info).exists():
-    #         Files.objects.filter(application=info).delete()
-
-    #     file_info = Files(
-    #         transcript=file_transcript,
-    #         CV=file_cv,
-    #         Photo=file_photo,
-    #         application=info,
-    #     )
-    #     file_info.save()
-
-    #     if Qualities.objects.filter(application=info).exists():
-    #         Qualities.objects.filter(application=info).delete()
-
-    #     qualities_info = Qualities(
-    #         extracirricular=extra,
-    #         application=info,
-    #     )
-    #     qualities_info.save()
-
-    #     send_mail(
-    #         'Application for recommendation letter',
-    #         f'Dear sir,\n {naam} has sent an application in Recommendation Letter Generator. Nearest Deadline is {deadlines[0]}. Please log in to generate the letter.\n Link: http://recommendation-generator.bct.itclub.pp.ua/',
-    #         'ioerecoletter@gmail.com',
-    #         [info.professor.email],
-    #         fail_silently=False,
-    #     )
-
-    # return render(request, "student_success.html", {'roll': uroll, 'letter': False, 'naam': naam})
-
-    if request.method == "POST" :
-        uroll = request.POST.get("roll")
-
-        naam = request.POST.get("naam")
-        prof_name = request.POST.get("prof_name")
-
-        from home.intake import parse_universities, save_universities
-        uni_rows = parse_universities(
-            names=request.POST.getlist("uni_name"),
-            countries=request.POST.getlist("uni_country"),
-            deadlines=request.POST.getlist("uni_deadline"),
-            programs=request.POST.getlist("uni_program"),
+    # --- academics: GPA or percentage, at least one ---
+    gpa = request.POST.get("gpa")
+    final_percentage = request.POST.get("final_percentage")
+    if not academics_present(gpa, final_percentage):
+        return _render_student_form(
+            request, student,
+            "Enter a GPA or a final percentage — at least one is required.",
         )
-        if not uni_rows or any(r["uni_deadline"] is None for r in uni_rows):
-            # Re-render the form itself (which surfaces ``error``), not the
-            # success page: student_success.html has no error slot, so rendering
-            # it made a rejected submission look like a successful one.
-            return render(request, "Studentform2.html", {
-                "roll": uroll, "naam": naam,
-                "prof_name": request.POST.get("prof_name"),
-                "error": "Each university needs a deadline.",
-            })
-        aca_gpa = request.POST.get("gpa")
-        aca_ranking = request.POST.get("tentative_ranking")
-        final_percentage = request.POST.get("final_percentage")
-        file_transcript = request.FILES.get("transcript")
-        file_cv = request.FILES.get("cv")
-        file_photo = request.FILES.get('photo')
-        #presentation= request.POST.get('presentation')
-        extra = request.POST.get('eca')
-        #quality = request.POST.get('qual')
 
+    # --- files + size limits ---
+    MAX_FILE = 5 * 1024 * 1024   # 5MB
+    MAX_PHOTO = 3 * 1024 * 1024  # 3MB
+    file_transcript = request.FILES.get("transcript")
+    file_cv = request.FILES.get("cv")
+    file_photo = request.FILES.get("photo")
+    if file_transcript and file_transcript.size > MAX_FILE:
+        return _render_student_form(request, student, "Transcript exceeds the 5MB limit.")
+    if file_cv and file_cv.size > MAX_FILE:
+        return _render_student_form(request, student, "CV exceeds the 5MB limit.")
+    if file_photo and file_photo.size > MAX_PHOTO:
+        return _render_student_form(request, student, "Photo exceeds the 3MB limit.")
 
-        # leaders = request.POST.get('quality1')
-        # hardwork = request.POST.get('quality2')
-        # social = request.POST.get('quality3')
-        # teamwork = request.POST.get('quality4')
-        # friendly = request.POST.get('quality5')
-        
-        # File size validation
-        if file_transcript and file_transcript.size > MAX_TRANSCRIPT_SIZE:
-            return render(request, "studentform.html", {"error": "Transcript file size exceeds the limit of 5MB."})
-        
-        if file_cv and file_cv.size > MAX_CV_SIZE:
-            return render(request, "studentform.html", {"error": "CV file size exceeds the limit of 5MB."})
-        
-        if file_photo and file_photo.size > MAX_PHOTO_SIZE:
-            return render(request, "studentform.html", {"error": "Photo file size exceeds the limit of 3MB."})
+    # --- subjects (checkbox names subject0..N, one per Subject row) ---
+    chosen_subjects = []
+    for i in range(Subject.objects.count()):
+        value = request.POST.get("subject" + str(i))
+        if value is not None:
+            chosen_subjects.append(value)
+    subjects_csv = ",".join(str(s) for s in chosen_subjects)
 
-        from home.intake import academics_present
-        if not academics_present(aca_gpa, final_percentage):
-            # Re-render the form (see the deadline branch above) so the student
-            # sees why nothing was saved instead of a false success page.
-            return render(request, "Studentform2.html", {
-                "roll": uroll, "naam": naam,
-                "prof_name": request.POST.get("prof_name"),
-                "error": "Enter a GPA or a final percentage — at least one is required.",
-            })
+    full_name = compose_full_name(
+        request.POST.get("first_name"),
+        request.POST.get("middle_name"),
+        request.POST.get("last_name"),
+    ) or student.username
 
-        info = Application.objects.get(std__username = naam ,professor__name = prof_name )
+    class_size = (request.POST.get("class_size") or "").strip()
 
+    with transaction.atomic():
+        # One application per (student, professor): resubmitting updates the
+        # in-progress row rather than creating a duplicate pending request.
+        info, _ = Application.objects.get_or_create(std=student, professor=prof)
+        info.name = full_name
+        info.email = request.POST.get("email")
+        info.professor = prof
+        info.std = student
         info.is_generated = False
+        info.years_taught = request.POST.get("yrs")
+        info.years_known = request.POST.get("yrs")
+        info.is_pro = request.POST.get("is_project") or "null"
+        info.subjects = subjects_csv
+        info.is_paper = request.POST.get("has_paper")
+        info.intern = request.POST.get("intern") == "on"
+        info.personal_statement = request.POST.get("personal_statement")
+        info.recommendation_purpose = request.POST.get("recommendation_purpose")
+        info.linkedIn = request.POST.get("linkedIn")
+        info.relationship_type = request.POST.get("relationship_type")
+        info.intern_company = request.POST.get("intern_company")
+        info.intern_role = request.POST.get("intern_role")
+        info.intern_duration = request.POST.get("intern_duration")
+        info.intern_outcome = request.POST.get("intern_outcome")
+        info.scholarships = request.POST.get("scholarships")
+        info.competitions_won = request.POST.get("competitions_won")
+        info.class_size = int(class_size) if class_size.isdigit() else None
+        info.ranking_percentile = request.POST.get("ranking_percentile")
+        info.language_instruction = request.POST.get("language_instruction")
+        info.first_name = request.POST.get("first_name")
+        info.middle_name = request.POST.get("middle_name")
+        info.last_name = request.POST.get("last_name")
+        info.contact_number = request.POST.get("contact_number")
+        info.applied_level = request.POST.get("applied_level")
+        info.known_roles = ",".join(request.POST.getlist("known_roles"))
+        info.enrollment_batch = request.POST.get("enrollment_batch")
+        info.passed_year = request.POST.get("passed_year")
+        info.professional_experience = request.POST.get("professional_experience")
+        info.strong_points = request.POST.get("strong_points")
+        info.weak_points = request.POST.get("weak_points")
         info.save()
 
+        Project.objects.filter(application=info).delete()
+        if request.POST.get("sproject") or request.POST.get("pro1"):
+            Project.objects.create(
+                application=info,
+                supervised_project=request.POST.get("sproject"),
+                final_project=request.POST.get("pro1"),
+                deployed=request.POST.get("deploy") == "on",
+            )
+
+        Paper.objects.filter(application=info).delete()
+        if request.POST.get("paper_title") or request.POST.get("paper_link"):
+            Paper.objects.create(
+                application=info,
+                paper_title=request.POST.get("paper_title"),
+                paper_link=request.POST.get("paper_link"),
+            )
+
         save_universities(info, uni_rows)
-        # earliest upcoming deadline across submitted universities (ISO dates sort lexically)
-        _deadlines = [r["uni_deadline"] for r in uni_rows if r["uni_deadline"]]
-        nearest_deadline = min(_deadlines) if _deadlines else None
 
-        academics_info = Academics(
-            gpa = aca_gpa,
-            tentative_ranking = aca_ranking,
-            final_percentage = final_percentage,
-            application  = info,
-        )
-        
-        if Academics.objects.filter(application = info ).exists():
-            academic = Academics.objects.get(application = info )
-            academic.delete()
-            
-        academics_info.save()
-
-        file_info = Files(
-            transcript = file_transcript,
-            CV = file_cv,
-            Photo = file_photo,
-            application = info,
-        )
-        
-        if Files.objects.filter(application = info ).exists():
-            file = Files.objects.get(application = info )
-            file.delete()
-            
-        file_info.save()
-
-        qualities_info = Qualities(
-            extracirricular = extra,
-            application = info ,
+        Academics.objects.filter(application=info).delete()
+        Academics.objects.create(
+            application=info,
+            gpa=gpa,
+            tentative_ranking=request.POST.get("tentative_ranking"),
+            final_percentage=final_percentage,
         )
 
-        # Delete-then-recreate must be atomic: a failure between the two used to
-        # leave the application permanently without a Qualities row.
-        with transaction.atomic():
-            Qualities.objects.filter(application=info).delete()
-            qualities_info.save()
+        Files.objects.filter(application=info).delete()
+        Files.objects.create(
+            application=info,
+            transcript=file_transcript,
+            CV=file_cv,
+            Photo=file_photo,
+        )
 
-        send_mail('Application for recommendation letter', f'Dear sir,\n {naam} has send application in Recommendation Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to generate the letter.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n\nBest Regards,\nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [info.professor.email], fail_silently=True)
+        Qualities.objects.filter(application=info).delete()
+        Qualities.objects.create(
+            application=info,
+            extracirricular=request.POST.get("eca"),
+        )
+
+    nearest_deadline = min(
+        (r["uni_deadline"] for r in uni_rows if r["uni_deadline"]), default=None
+    )
+    send_mail(
+        "Application for recommendation letter",
+        f"Dear sir,\n {student.username} has sent an application in Recommendation "
+        f"Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to "
+        f"generate the letter.\n Link: http://recommendation-generator.bct.itclub.pp.ua/"
+        f"\n\nBest Regards,\nIoe Recommendation Letter Generator",
+        "ioerecoletter@gmail.com",
+        [prof.email],
+        fail_silently=True,
+    )
+
+    return render(request, "student_success.html", {
+        "roll": student.roll_number, "letter": False, "naam": student.username,
+    })
 
 
-    return render(request, "student_success.html",{'roll':uroll, 'letter' : False, 'naam' : naam})
-
+def studentform2(request):
+    """The application is now a single page; keep this path working for any
+    stale links/bookmarks by sending them to the one form."""
+    return redirect("/studentform1")
 
 
 def loginTeacher(request):

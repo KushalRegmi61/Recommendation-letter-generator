@@ -234,7 +234,7 @@ class SaveUniversitiesTests(TestCase):
         self.assertEqual(names, ["NEW"])
 
 
-class Studentform1PostTests(TestCase):
+class StudentApplicationPostTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(dept_name="BCE")
         self.program = Program.objects.create(program_name="BE4", department=self.dept)
@@ -246,74 +246,61 @@ class Studentform1PostTests(TestCase):
             unique_id="88888", name="Dr Thapa", email="t@example.com",
             department=self.dept,
         )
+        login_as_student(self.client, self.student)
 
-    def _post_data(self):
-        return {
-            "naam": "dan", "roll": "075BCE003",
-            "email": "dan@example.com",
+    def _full_payload(self, **overrides):
+        data = {
             "prof": "Dr Thapa|88888",
+            "email": "dan@example.com",
             "first_name": "Dan", "middle_name": "", "last_name": "Gurung",
-            "contact_number": "9811111111",
-            "applied_level": "PhD",
+            "contact_number": "9811111111", "applied_level": "PhD",
             "known_roles": ["instructor", "thesis supervisor"],
-            "yrs": "4",
-            "enrollment_batch": "075",
-            "passed_year": "2079",
+            "yrs": "4", "enrollment_batch": "075", "passed_year": "2079",
             "professional_experience": "TA for 2 years",
             "strong_points": "Curious", "weak_points": "Impatient",
+            "is_project": "Yes", "has_paper": "No", "sproject": "Robot arm",
+            "uni_name": ["MIT"], "uni_country": ["USA"],
+            "uni_program": ["MS CS"], "uni_deadline": ["2026-12-15"],
+            "gpa": "3.8", "final_percentage": "", "tentative_ranking": "Top 5%",
+            "eca": "Robotics club",
         }
+        data.update(overrides)
+        return data
 
-    def test_saves_new_fields_on_application(self):
-        resp = self.client.post("/studentform1", data=self._post_data())
+    def test_single_post_creates_application_and_all_satellites(self):
+        resp = self.client.post("/studentform1", data=self._full_payload())
         self.assertEqual(resp.status_code, 200)
         app = Application.objects.get(std=self.student, professor=self.prof)
         self.assertEqual(app.first_name, "Dan")
         self.assertEqual(app.last_name, "Gurung")
-        self.assertEqual(app.contact_number, "9811111111")
         self.assertEqual(app.applied_level, "PhD")
         self.assertEqual(app.known_roles, "instructor,thesis supervisor")
-        self.assertEqual(app.enrollment_batch, "075")
-        self.assertEqual(app.passed_year, "2079")
-        self.assertEqual(app.strong_points, "Curious")
         self.assertEqual(app.name, "Dan Gurung")
         self.assertFalse(app.is_generated)
+        self.assertEqual(University.objects.filter(application=app).count(), 1)
+        self.assertEqual(Academics.objects.get(application=app).gpa, "3.8")
+        self.assertTrue(Qualities.objects.filter(application=app).exists())
 
-
-class StudentForm1PrefillTests(TestCase):
-    def setUp(self):
-        self.dept = Department.objects.create(dept_name="BCT")
-        self.program = Program.objects.create(program_name="BE", department=self.dept)
-        self.student = StudentLoginInfo.objects.create(
-            username="alice", roll_number="075BCT001",
+    def test_identity_comes_from_the_session_not_the_post_body(self):
+        other = StudentLoginInfo.objects.create(
+            username="mallory", roll_number="075BCE999",
             department=self.dept, program=self.program, dob="2000-01-01",
         )
-        self.other = StudentLoginInfo.objects.create(
-            username="bob", roll_number="075BCT002",
-            department=self.dept, program=self.program, dob="2000-01-01",
-        )
-        self.prof = TeacherInfo.objects.create(
-            unique_id="12345", name="Dr Smith", email="smith@example.com",
-            department=self.dept,
-        )
-        self.app = Application.objects.create(
-            std=self.student, professor=self.prof, name="Alice",
-            strong_points="Diligent", is_generated=False,
-        )
+        # A forged naam/roll in the body must be ignored: the application is
+        # created for the signed-in student, never the impersonated one.
+        self.client.post("/studentform1", data=self._full_payload(
+            naam="mallory", roll="075BCE999",
+        ))
+        self.assertFalse(Application.objects.filter(std=other).exists())
+        self.assertTrue(Application.objects.filter(std=self.student).exists())
 
-    def test_get_prefills_from_own_inprogress_application(self):
-        login_as_student(self.client, self.student)
-        resp = self.client.get("/studentform1")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["application"].strong_points, "Diligent")
-
-    def test_get_does_not_prefill_another_students_application(self):
-        login_as_student(self.client, self.other)
-        resp = self.client.get("/studentform1")
-        self.assertIsNone(resp.context.get("application"))
+    def test_a_logged_out_student_cannot_submit(self):
+        self.client.cookies.clear()
+        self.client.post("/studentform1", data=self._full_payload())
+        self.assertFalse(Application.objects.filter(std=self.student).exists())
 
 
-@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-class Studentform2PostTests(TestCase):
+class StudentApplicationSatelliteTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(dept_name="BAR")
         self.program = Program.objects.create(program_name="BE5", department=self.dept)
@@ -325,13 +312,16 @@ class Studentform2PostTests(TestCase):
             unique_id="99999", name="Dr Basnet", email="b@example.com",
             department=self.dept,
         )
-        self.app = Application.objects.create(
-            std=self.student, professor=self.prof, name="Eve", is_generated=False,
-        )
+        login_as_student(self.client, self.student)
 
     def _post_data(self):
         return {
-            "roll": "075BAR004", "naam": "eve", "prof_name": "Dr Basnet",
+            "prof": "Dr Basnet|99999",
+            "email": "eve@example.com", "first_name": "Eve", "last_name": "K",
+            "contact_number": "980", "applied_level": "Masters",
+            "yrs": "3", "enrollment_batch": "075",
+            "strong_points": "x", "weak_points": "y",
+            "is_project": "No", "has_paper": "No", "sproject": "P",
             "uni_name": ["MIT", "ETH"],
             "uni_country": ["USA", "Switzerland"],
             "uni_deadline": ["2026-12-15", "2027-01-20"],
@@ -341,43 +331,37 @@ class Studentform2PostTests(TestCase):
         }
 
     def test_saves_repeatable_universities_and_percentage(self):
-        resp = self.client.post("/studentform2", data=self._post_data())
+        resp = self.client.post("/studentform1", data=self._post_data())
         self.assertEqual(resp.status_code, 200)
-        unis = University.objects.filter(application=self.app).order_by("uni_name")
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        unis = University.objects.filter(application=app).order_by("uni_name")
         self.assertEqual(unis.count(), 2)
         self.assertEqual(unis[0].uni_name, "ETH")
         self.assertEqual(unis[0].country, "Switzerland")
-        aca = Academics.objects.get(application=self.app)
-        self.assertEqual(aca.final_percentage, "88")
+        self.assertEqual(Academics.objects.get(application=app).final_percentage, "88")
 
     def test_a_failed_qualities_save_does_not_destroy_the_existing_row(self):
-        # studentform2 deletes the old row before saving the replacement. Without
-        # the transaction.atomic() wrapper a failed save leaves the application
-        # permanently Qualities-less.
+        # The whole write is one transaction: a failed Qualities save rolls the
+        # delete back with it, so the existing row survives.
         from unittest import mock
-        Qualities.objects.create(
-            application=self.app, extracirricular="OLD MARKER",
-        )
+        app = Application.objects.create(std=self.student, professor=self.prof, name="Eve")
+        Qualities.objects.create(application=app, extracirricular="OLD MARKER")
         with mock.patch.object(Qualities, "save", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
-                self.client.post("/studentform2", data=self._post_data())
-        # The old row must still be there - the delete is rolled back with it.
+                self.client.post("/studentform1", data=self._post_data())
         self.assertEqual(
-            Qualities.objects.get(application=self.app).extracirricular, "OLD MARKER"
+            Qualities.objects.get(application=app).extracirricular, "OLD MARKER"
         )
 
-    def test_duplicate_pending_is_rejected(self):
-        # studentform2 fetches-and-updates the existing pending application (via
-        # Application.objects.get(std__username=..., professor__name=...)), so the
-        # count stays at 1 — i.e. this asserts no duplicate pending row is created.
-        self.client.post("/studentform2", data=self._post_data())
+    def test_resubmitting_updates_the_same_pending_row(self):
+        self.client.post("/studentform1", data=self._post_data())
+        self.client.post("/studentform1", data=self._post_data())
         self.assertEqual(
             Application.objects.filter(
                 std=self.student, professor=self.prof, is_generated=False
             ).count(),
             1,
         )
-
 
 class Studentform1RenderTests(TestCase):
     def setUp(self):
@@ -4256,7 +4240,7 @@ class AcademicsPresentTests(SimpleTestCase):
         self.assertTrue(academics_present(None, "82.5"))
 
 
-class StudentForm2AcademicsTests(TestCase):
+class StudentAcademicsValidationTests(TestCase):
     def setUp(self):
         self.dept = Department.objects.create(dept_name="BCT")
         self.program = Program.objects.create(program_name="BE", department=self.dept)
@@ -4268,24 +4252,30 @@ class StudentForm2AcademicsTests(TestCase):
             unique_id="12345", name="Dr Smith", email="smith@example.com",
             department=self.dept,
         )
-        self.app = Application.objects.create(
-            std=self.student, professor=self.prof, name="Alice",
-        )
+        login_as_student(self.client, self.student)
 
     def _post(self, **overrides):
         data = {
-            "roll": "075BCT001", "naam": "alice", "prof_name": "Dr Smith",
+            "prof": "Dr Smith|12345",
+            "email": "alice@example.com", "first_name": "Alice", "last_name": "S",
+            "contact_number": "980", "applied_level": "Masters", "yrs": "3",
+            "enrollment_batch": "075", "strong_points": "x", "weak_points": "y",
+            "is_project": "No", "has_paper": "No", "sproject": "P",
             "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
             "uni_deadline": "2026-12-01",
             "gpa": "3.8", "final_percentage": "82.5",
             "tentative_ranking": "Top 5%", "eca": "Robotics club",
         }
         data.update(overrides)
-        return self.client.post("/studentform2", data)
+        return self.client.post("/studentform1", data)
+
+    def _app(self):
+        return Application.objects.filter(std=self.student, professor=self.prof).first()
 
     def test_both_blank_is_rejected(self):
         self._post(gpa="", final_percentage="")
-        self.assertFalse(Academics.objects.filter(application=self.app).exists())
+        app = self._app()
+        self.assertTrue(app is None or not Academics.objects.filter(application=app).exists())
 
     def test_rejection_surfaces_the_error(self):
         # The student must SEE why nothing was saved — not a false success page.
@@ -4295,20 +4285,19 @@ class StudentForm2AcademicsTests(TestCase):
 
     def test_gpa_only_saves(self):
         self._post(gpa="3.8", final_percentage="")
-        self.assertTrue(Academics.objects.filter(application=self.app).exists())
+        self.assertTrue(Academics.objects.filter(application=self._app()).exists())
 
     def test_percentage_only_saves(self):
         self._post(gpa="", final_percentage="82.5")
-        self.assertTrue(Academics.objects.filter(application=self.app).exists())
+        self.assertTrue(Academics.objects.filter(application=self._app()).exists())
 
     def test_academics_is_a_single_field_with_a_type_toggle(self):
         # The form must present ONE score box plus a GPA/Percentage type toggle,
         # not two separate always-visible GPA and Percentage inputs.
-        resp = self._post(gpa="", final_percentage="")  # re-renders Studentform2
+        resp = self._post(gpa="", final_percentage="")  # re-renders the form
         self.assertContains(resp, 'id="score_type"')
         self.assertContains(resp, 'id="score_value"')
         self.assertNotContains(resp, "Final Percentage Score (or GPA above)")
-
 
 class DeadlineFilterSortTests(TestCase):
     def setUp(self):
@@ -4374,13 +4363,15 @@ class StudentDeadlineRequiredTests(TestCase):
             unique_id="12345", name="Dr Smith", email="smith@example.com",
             department=self.dept,
         )
-        self.app = Application.objects.create(
-            std=self.student, professor=self.prof, name="Alice",
-        )
+        login_as_student(self.client, self.student)
 
     def _post_blank_deadline(self):
-        return self.client.post("/studentform2", {
-            "roll": "075BCT001", "naam": "alice", "prof_name": "Dr Smith",
+        return self.client.post("/studentform1", {
+            "prof": "Dr Smith|12345",
+            "email": "alice@example.com", "first_name": "Alice", "last_name": "S",
+            "contact_number": "980", "applied_level": "Masters", "yrs": "3",
+            "enrollment_batch": "075", "strong_points": "x", "weak_points": "y",
+            "is_project": "No", "has_paper": "No", "sproject": "P",
             "uni_name": "MIT", "uni_country": "USA", "uni_program": "MS",
             "uni_deadline": "",
             "gpa": "3.8", "final_percentage": "", "tentative_ranking": "Top 5%",
@@ -4389,13 +4380,13 @@ class StudentDeadlineRequiredTests(TestCase):
 
     def test_blank_deadline_is_rejected(self):
         self._post_blank_deadline()
-        self.assertFalse(University.objects.filter(application=self.app).exists())
+        app = Application.objects.filter(std=self.student, professor=self.prof).first()
+        self.assertTrue(app is None or not University.objects.filter(application=app).exists())
 
     def test_rejection_surfaces_the_error(self):
         resp = self._post_blank_deadline()
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Each university needs a deadline.")
-
 
 class ApplyProfessorEditsTests(TestCase):
     def setUp(self):

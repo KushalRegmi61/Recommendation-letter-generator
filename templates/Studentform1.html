@@ -12,8 +12,13 @@
   {% endfor %}{% endif %}
   <div class="container">
     <div class="title">Hey {{naam}}!</div>
+    {% if error %}
+    <div class="error-banner" style="background:#fdecea;color:#b00020;padding:10px 14px;border-radius:5px;margin:10px 0;">
+      {{ error }}
+    </div>
+    {% endif %}
     <div class="content">
-      <form method="POST" action="/studentform1">
+      <form method="POST" action="/studentform1" enctype="multipart/form-data">
       {% csrf_token %}
         <div class="user-details">
           <!-- <div class="input-box">
@@ -275,10 +280,70 @@
           </div>
           
           <div class="input-box">
-        <span class="details">Photo</span>
-        <input type="file" name="photo" accept="image/*">
+        <span class="details">Photo *</span>
+        <input type="file" name="photo" accept="image/*" required>
          </div>
-          
+
+          <!-- Universities applied to (repeatable, each needs a deadline) -->
+          <div class="input-box" style="width:100%;">
+            <span class="details">Universities *</span>
+            <div id="universities">
+              <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                <input type="text" name="uni_name" placeholder="University name" required style="flex:2;min-width:150px;">
+                <input type="text" name="uni_country" placeholder="Country" required style="flex:1;min-width:100px;">
+                <input type="text" name="uni_program" placeholder="Program applied" style="flex:1;min-width:120px;">
+                <input type="date" name="uni_deadline" placeholder="Deadline" required style="flex:1;min-width:130px;">
+                <button type="button" class="remove-uni" style="flex:none;">Remove</button>
+              </div>
+            </div>
+            <button type="button" id="add-uni">+ Add another university</button>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Academic score *</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="score_type" style="flex:0 0 auto; width:auto;">
+                <option value="gpa" selected>GPA</option>
+                <option value="final_percentage">Percentage</option>
+              </select>
+              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
+            </div>
+            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
+            <input type="hidden" name="gpa">
+            <input type="hidden" name="final_percentage">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Tentative Ranking *</span>
+            <select name="tentative_ranking" required>
+              <option></option>
+              <option>Batch Topper</option>
+              <option>Top 5%</option>
+              <option>Top 10%</option>
+              <option>Top 20%</option>
+              <option>Top 30%</option>
+              <option>Top 40%</option>
+            </select>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Transcript *</span>
+            <input type="file" name="transcript" accept=".pdf, .doc, .docx" required>
+            <small style="color:#777;font-size:12px;">Max size: 5MB</small>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Recent CV *</span>
+            <input type="file" name="cv" accept=".pdf, .doc, .docx" required>
+            <small style="color:#777;font-size:12px;">Max size: 5MB</small>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Extracurricular Activities *</span>
+            <textarea name="eca" rows="4" required></textarea>
+          </div>
+
+
 
 
 
@@ -296,7 +361,7 @@
           
 
           <div class="button">
-            <input type="submit" value="  Next  " />
+            <input type="submit" value="  Submit  " />
           </div>
       </form>
     </div>
@@ -362,7 +427,49 @@ checkboxes.style.display = "none";
 expanded = false;
 }
 }
-     
+
+      // If a professor is already selected when the page loads, fetch that
+      // professor's subjects immediately — the AJAX above otherwise only fires
+      // on a change event.
+      $(document).ready(function () {
+        var sel = $('#teacher').val();
+        if (sel && sel !== '---') { $('#teacher').trigger('change'); }
+      });
 </script>
+
+  <script>
+    // Repeatable university rows.
+    document.getElementById('add-uni').addEventListener('click', function () {
+      var container = document.getElementById('universities');
+      var clone = container.querySelector('.uni-row').cloneNode(true);
+      clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+      container.appendChild(clone);
+    });
+    document.getElementById('universities').addEventListener('click', function (e) {
+      if (e.target.classList.contains('remove-uni')) {
+        var rows = this.querySelectorAll('.uni-row');
+        if (rows.length > 1) e.target.closest('.uni-row').remove();
+      }
+    });
+
+    // Route the single score value into the right hidden column (server
+    // contract stays gpa / final_percentage).
+    (function () {
+      var typeSel = document.getElementById('score_type');
+      var valInput = document.getElementById('score_value');
+      var gpa = document.querySelector('input[name="gpa"]');
+      var pct = document.querySelector('input[name="final_percentage"]');
+      function route() {
+        var v = valInput.value.trim();
+        gpa.value = '';
+        pct.value = '';
+        (typeSel.value === 'final_percentage' ? pct : gpa).value = v;
+        valInput.placeholder = typeSel.value === 'final_percentage' ? 'e.g. 82.5' : 'e.g. 3.8';
+      }
+      typeSel.addEventListener('change', route);
+      valInput.addEventListener('input', route);
+      route();
+    })();
+  </script>
 
 {% endblock body %}
