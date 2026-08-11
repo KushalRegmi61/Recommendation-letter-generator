@@ -61,13 +61,42 @@
     <div class="surface detail-card">
       <h3><i class="bi bi-mortarboard"></i> Academic</h3>
       <dl class="kv">
-        <dt>GPA</dt><dd><input type="text" name="gpa" value="{{ academics.gpa|default:'' }}"></dd>
+        <dt>Score</dt><dd>
+          <div style="display:flex;gap:6px;">
+            <select id="prof_score_type" style="width:auto;">
+              <option value="gpa">GPA</option>
+              <option value="final_percentage">Percentage</option>
+            </select>
+            <input type="text" id="prof_score_value">
+          </div>
+          <input type="hidden" name="gpa" value="{{ academics.gpa|default:'' }}">
+          <input type="hidden" name="final_percentage" value="{{ academics.final_percentage|default:'' }}">
+        </dd>
         <dt>Tentative ranking</dt><dd><input type="text" name="tentative_ranking" value="{{ academics.tentative_ranking|default:'' }}"></dd>
-        <dt>Final %</dt><dd><input type="text" name="final_percentage" value="{{ academics.final_percentage|default:'' }}"></dd>
         <dt>Class size</dt><dd><input type="number" name="class_size" value="{{ student.class_size|default:'' }}"></dd>
         <dt>Ranking percentile</dt><dd><input type="text" name="ranking_percentile" value="{{ student.ranking_percentile|default:'' }}"></dd>
         <dt>Language</dt><dd><input type="text" name="language_instruction" value="{{ student.language_instruction|default:'' }}"></dd>
       </dl>
+      <script>
+        (function () {
+          var t = document.getElementById('prof_score_type');
+          var v = document.getElementById('prof_score_value');
+          var gpa = document.querySelector('input[name="gpa"]');
+          var pct = document.querySelector('input[name="final_percentage"]');
+          // Seed the single visible field from whichever column already holds a
+          // value (GPA preferred), then keep exactly one column populated.
+          if (!gpa.value && pct.value) { t.value = 'final_percentage'; v.value = pct.value; }
+          else { t.value = 'gpa'; v.value = gpa.value; }
+          function route() {
+            var val = v.value.trim();
+            gpa.value = ''; pct.value = '';
+            (t.value === 'final_percentage' ? pct : gpa).value = val;
+          }
+          t.addEventListener('change', route);
+          v.addEventListener('input', route);
+          route();
+        })();
+      </script>
       <p class="text-muted mb-0 mt-2" style="font-size:.78rem;">Enter a GPA or a final percentage — at least one is required.</p>
     </div>
 
