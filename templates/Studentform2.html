@@ -44,14 +44,36 @@
           </script>
 
           <div class="input-box">
-            <span class="details">GPA (or percentage below):</span>
-            <input type="text" name="gpa">
+            <span class="details">Academic score *</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="score_type" style="flex:0 0 auto; width:auto;">
+                <option value="gpa" selected>GPA</option>
+                <option value="final_percentage">Percentage</option>
+              </select>
+              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
+            </div>
+            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
+            <input type="hidden" name="gpa">
+            <input type="hidden" name="final_percentage">
           </div>
-
-          <div class="input-box">
-            <span class="details">Final Percentage Score (or GPA above)</span>
-            <input type="text" name="final_percentage" placeholder="e.g. 82.5">
-          </div>
+          <script>
+            (function () {
+              var typeSel = document.getElementById('score_type');
+              var valInput = document.getElementById('score_value');
+              var gpa = document.querySelector('input[name="gpa"]');
+              var pct = document.querySelector('input[name="final_percentage"]');
+              function route() {
+                var v = valInput.value.trim();
+                gpa.value = '';
+                pct.value = '';
+                (typeSel.value === 'final_percentage' ? pct : gpa).value = v;
+                valInput.placeholder = typeSel.value === 'final_percentage' ? 'e.g. 82.5' : 'e.g. 3.8';
+              }
+              typeSel.addEventListener('change', route);
+              valInput.addEventListener('input', route);
+              route();
+            })();
+          </script>
 
           <div class="input-box">
             <span class="details">Tentative Ranking *</span>

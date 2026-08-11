@@ -4301,6 +4301,14 @@ class StudentForm2AcademicsTests(TestCase):
         self._post(gpa="", final_percentage="82.5")
         self.assertTrue(Academics.objects.filter(application=self.app).exists())
 
+    def test_academics_is_a_single_field_with_a_type_toggle(self):
+        # The form must present ONE score box plus a GPA/Percentage type toggle,
+        # not two separate always-visible GPA and Percentage inputs.
+        resp = self._post(gpa="", final_percentage="")  # re-renders Studentform2
+        self.assertContains(resp, 'id="score_type"')
+        self.assertContains(resp, 'id="score_value"')
+        self.assertNotContains(resp, "Final Percentage Score (or GPA above)")
+
 
 class DeadlineFilterSortTests(TestCase):
     def setUp(self):
