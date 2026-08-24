@@ -4745,3 +4745,12 @@ class TemplateEditorPageTests(TestCase):
             "templateName": "Typo", "content": "Hi {{ nmae }}",
         })
         self.assertContains(resp, "nmae")
+
+
+class StudentRegistrationValidationTests(TestCase):
+    def test_a_blank_department_shows_an_error_not_a_500(self):
+        # Posting without a valid department/program (e.g. an empty form) must
+        # re-render the page with an error rather than raising DoesNotExist.
+        resp = self.client.post("/registerStudent", {"csrfmiddlewaretoken": "x"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(StudentLoginInfo.objects.exists())

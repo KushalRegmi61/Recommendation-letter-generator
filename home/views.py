@@ -278,9 +278,14 @@ def registerStudent(request):
         confirmPass = request.POST.get("confirmPass")
         depart = request.POST.get("department")
         prog = request.POST.get("program")
-        department = Department.objects.get(dept_name=depart)
-        program = Program.objects.get(program_name=prog)
-        
+        # A blank or unknown department/program must surface a form error, not a
+        # 500: ``.get()`` here raised ``DoesNotExist`` for an empty POST.
+        department = Department.objects.filter(dept_name=depart).first()
+        program = Program.objects.filter(program_name=prog).first()
+        if department is None or program is None:
+            messages.error(request, "Please choose a valid department and program.")
+            return render(request, "registerStudent.html", context=context_dict)
+
         if Pass != confirmPass:
             messages.error(request, "Passwords donot match")
             return render(request, "registerStudent.html", context=context_dict )
