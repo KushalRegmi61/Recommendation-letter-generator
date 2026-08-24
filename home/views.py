@@ -225,7 +225,16 @@ def studentfinal(request, *args, **kwargs):
 def registerStudent(request):
     departments = Department.objects.all().values()
     programs = Program.objects.all().values()
-    context_dict = { "departments": departments , "programs": programs}
+    # Map each department to its own programs so the register form can cascade
+    # the Program dropdown to the chosen department (its "respective programs").
+    programs_by_dept = {}
+    for p in Program.objects.select_related("department"):
+        programs_by_dept.setdefault(p.department.dept_name, []).append(p.program_name)
+    context_dict = {
+        "departments": departments,
+        "programs": programs,
+        "programs_by_dept": programs_by_dept,
+    }
     
     if request.method == "GET":
         student = current_student(request)
@@ -524,6 +533,7 @@ def studentform1(request):
 
     from home.intake import (
         parse_universities, save_universities, academics_present, compose_full_name,
+        normalize_bs_year,
     )
 
     # --- professor (must be one of the student's department) ---
@@ -549,6 +559,21 @@ def studentform1(request):
         return _render_student_form(
             request, student,
             "Enter a GPA or a final percentage — at least one is required.",
+        )
+
+    # --- BS years: store a consistent 4-digit form (080 / 80 → 2080) ---
+    enrollment_batch = normalize_bs_year(request.POST.get("enrollment_batch"))
+    if enrollment_batch is None:
+        return _render_student_form(
+            request, student,
+            "Enter a valid enrollment batch year (e.g. 2080).",
+        )
+    raw_passed = (request.POST.get("passed_year") or "").strip()
+    passed_year = normalize_bs_year(raw_passed) if raw_passed else ""
+    if raw_passed and passed_year is None:
+        return _render_student_form(
+            request, student,
+            "Enter a valid passed year (e.g. 2079), or leave it blank.",
         )
 
     # --- files + size limits ---
@@ -591,7 +616,6 @@ def studentform1(request):
         info.years_known = request.POST.get("yrs")
         info.subjects = subjects_csv
         info.is_paper = request.POST.get("has_paper")
-        info.relationship_type = request.POST.get("relationship_type")
         info.first_name = request.POST.get("first_name")
         info.middle_name = request.POST.get("middle_name")
         info.last_name = request.POST.get("last_name")
@@ -599,9 +623,14 @@ def studentform1(request):
         info.contact_number = request.POST.get("contact_number")
         info.applied_level = request.POST.get("applied_level")
         info.program = request.POST.get("program")
-        info.known_roles = ",".join(request.POST.getlist("known_roles"))
-        info.enrollment_batch = request.POST.get("enrollment_batch")
-        info.passed_year = request.POST.get("passed_year")
+        roles = request.POST.getlist("known_roles")
+        info.known_roles = ",".join(roles)
+        # The free-text "relationship" field was dropped as a duplicate of the
+        # Role checkboxes; derive it from the first selected role so the letter's
+        # ``rel_desc`` still reads naturally ("as their instructor").
+        info.relationship_type = roles[0] if roles else None
+        info.enrollment_batch = enrollment_batch
+        info.passed_year = passed_year
         info.professional_experience = request.POST.get("professional_experience")
         info.strong_points = request.POST.get("strong_points")
         info.weak_points = request.POST.get("weak_points")

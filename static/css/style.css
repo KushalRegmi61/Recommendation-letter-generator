@@ -1,3 +1,24 @@
+/* ============================================================
+   Tribhuvan University (TU) theme tokens — derived from the TU
+   logo (static/images/tu.png): red #e01b22 + blue #6692cc on white.
+   Red = primary (titles, buttons, CTAs); blue = interactive accents
+   (focus, links). Defined once here (style.css loads on every page),
+   so main.css and page-scoped styles resolve the same var() tokens.
+   Contrast-checked: brand red 4.83:1 on white (AA text + white-on-red
+   button); blue text uses the darker #3a63a6 (5.97:1) for AA.
+   ============================================================ */
+:root {
+  --tu-red: #e01b22;
+  --tu-red-dark: #b3141a;
+  --tu-blue: #6692cc;
+  --tu-blue-dark: #3a63a6;
+  --tu-gradient: linear-gradient(135deg, #e01b22, #6692cc);
+  --tu-gradient-hover: linear-gradient(135deg, #b3141a, #3a63a6);
+  --tu-ring: rgba(224, 27, 34, 0.18);
+  --tu-red-tint: #fdeeee;
+  --tu-blue-tint: #f2f6fb;
+}
+
 * {
   margin: 0px;
   padding: 0px;
@@ -69,10 +90,12 @@ nav {
 
 .intro-text h1 {
   font-size: 44px;
-  font-weight: 500;
-  background: linear-gradient(to right, #494964, #6f6f89);
+  font-weight: 600;
+  color: var(--tu-red); /* solid fallback if background-clip:text is unsupported */
+  background: var(--tu-gradient);
   -webkit-background-clip: text;
   background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .intro-text p {
@@ -86,9 +109,9 @@ nav {
 }
 
 .cta-select {
-  border: 2px solid #c36cbb;
+  border: 2px solid var(--tu-red);
   background: transparent;
-  color: #c36cbb;
+  color: var(--tu-red);
   width: 150px;
   height: 50px;
   cursor: pointer;
@@ -96,7 +119,7 @@ nav {
 }
 
 .cta-add {
-  background: #c36cbb;
+  background: var(--tu-red);
   width: 150px;
   height: 50px;
   cursor: pointer;
@@ -237,7 +260,7 @@ button.hide-me {
   height: 3px;
   width: 600px;
   border-radius: 5px;
-  background: linear-gradient(135deg, #71b7e6, #c36cbb);
+  background: var(--tu-gradient);
 }
 
 .content form .user-details {
@@ -332,7 +355,7 @@ form .wrap-input100 .details {
 
 .user-details .input-box input:focus,
 .user-details .input-box input:valid {
-  border-color: #9b59b6;
+  border-color: var(--tu-blue-dark);
 }
 
 .user-details .input-box select {
@@ -349,7 +372,7 @@ form .wrap-input100 .details {
 
 .user-details .input-box select:focus,
 .user-details .input-box select:valid {
-  border-color: #c36cbb;
+  border-color: var(--tu-blue-dark);
 }
 
 form .gender-details .gender-title {
@@ -383,7 +406,7 @@ form .category label .dot {
 #dot-1:checked ~ .category label .one,
 #dot-2:checked ~ .category label .two,
 #dot-3:checked ~ .category label .three {
-  background: #9b59b6;
+  background: var(--tu-red);
   border-color: #d9d9d9;
 }
 
@@ -407,12 +430,12 @@ form .button input {
   letter-spacing: 1px;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: linear-gradient(135deg, #71b7e6, #c36cbb);
+  background: var(--tu-gradient);
 }
 
 form .button input:hover {
   /* transform: scale(0.99); */
-  background: linear-gradient(-135deg, #71b7e6, #9b59b6);
+  background: var(--tu-gradient-hover);
 }
 
 @media (max-width: 584px) {
@@ -526,7 +549,7 @@ form .button input:hover {
 /* The actual text that will move */
 .rolling-text {
   display: inline-block;
-  color: #c36cbb; /* Optional: Change text color */
+  color: var(--tu-red); /* Optional: Change text color */
   padding: 10px 0;
   font-size: 18px; /* Optional: Adjust font size */
   animation: scroll-left 30s linear infinite;
@@ -541,3 +564,95 @@ form .button input:hover {
     transform: translateX(-100%);
   }
 }
+
+/* ============================================================
+   Bootstrap element theming — map every Bootstrap button/badge
+   variant onto the TU palette so no page shows Bootstrap's default
+   blue / green / yellow. This project ships Bootstrap 5.0.1, which
+   predates the --bs-btn-* button variables (5.3+), so we override the
+   real background/border/color properties. style.css loads after
+   Bootstrap; !important guarantees the theme wins over Bootstrap's
+   higher-specificity :active selectors. Red = primary, blue =
+   success/info/secondary accents, red-dark = warning/danger.
+   ============================================================ */
+.btn-primary,
+.btn-primary:disabled,
+.btn-primary.disabled {
+  background-color: var(--tu-red) !important;
+  border-color: var(--tu-red) !important;
+  color: #fff !important;
+}
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active,
+.btn-primary:not(:disabled):not(.disabled):active {
+  background-color: var(--tu-red-dark) !important;
+  border-color: var(--tu-red-dark) !important;
+  color: #fff !important;
+}
+.btn-primary:focus,
+.btn-primary:active:focus {
+  box-shadow: 0 0 0 0.25rem var(--tu-ring) !important;
+}
+
+.btn-success,
+.btn-info {
+  background-color: var(--tu-blue-dark) !important;
+  border-color: var(--tu-blue-dark) !important;
+  color: #fff !important;
+}
+.btn-success:hover, .btn-success:focus, .btn-success:active,
+.btn-info:hover, .btn-info:focus, .btn-info:active {
+  background-color: #2f5596 !important;
+  border-color: #2f5596 !important;
+  color: #fff !important;
+}
+
+.btn-warning {
+  background-color: var(--tu-red) !important;
+  border-color: var(--tu-red) !important;
+  color: #fff !important;
+}
+.btn-warning:hover, .btn-warning:focus, .btn-warning:active {
+  background-color: var(--tu-red-dark) !important;
+  border-color: var(--tu-red-dark) !important;
+  color: #fff !important;
+}
+
+.btn-danger {
+  background-color: #c0161c !important;
+  border-color: #c0161c !important;
+  color: #fff !important;
+}
+.btn-danger:hover, .btn-danger:focus, .btn-danger:active {
+  background-color: #9d1116 !important;
+  border-color: #9d1116 !important;
+  color: #fff !important;
+}
+
+/* Secondary = outlined TU red, subordinate to the red fill. */
+.btn-secondary {
+  background-color: #fff !important;
+  border-color: var(--tu-red) !important;
+  color: var(--tu-red) !important;
+}
+.btn-secondary:hover, .btn-secondary:focus, .btn-secondary:active {
+  background-color: var(--tu-red-tint) !important;
+  border-color: var(--tu-red-dark) !important;
+  color: var(--tu-red-dark) !important;
+}
+
+.btn-outline-primary {
+  color: var(--tu-red) !important;
+  border-color: var(--tu-red) !important;
+}
+.btn-outline-primary:hover, .btn-outline-primary:active {
+  background-color: var(--tu-red) !important;
+  border-color: var(--tu-red) !important;
+  color: #fff !important;
+}
+
+.bg-info, .bg-primary { background-color: var(--tu-blue-dark) !important; }
+.bg-success { background-color: var(--tu-red) !important; }
+.text-primary { color: var(--tu-red) !important; }
+.text-success { color: var(--tu-blue-dark) !important; }

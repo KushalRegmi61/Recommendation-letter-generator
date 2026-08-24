@@ -59,11 +59,11 @@
                         <span class="details">Gender:</span>
                         <div style="display:flex; gap:10px;">
                             <div style="display:flex; gap:2px;">
-                                <input style="border:2px dotted #00f;display:inline;background:#ff0000;" type="radio" id="male" name="gender" value="Male">
+                                <input style="display:inline;accent-color:#e01b22;width:16px;height:16px;" type="radio" id="male" name="gender" value="Male">
                                 <label for="male">Male</label>
                             </div>
                             <div style="display:flex;gap:2px;">
-                                <input style="border:2px dotted #00f;display:inline;background:#ff0000;" type="radio" id="female" name="gender" value="Female">
+                                <input style="display:inline;accent-color:#e01b22;width:16px;height:16px;" type="radio" id="female" name="gender" value="Female">
                                 <label for="female">Female</label>
                             </div>
                         </div>
@@ -71,31 +71,58 @@
                    
                     <div style="margin-top:25px;position:relative; width: 100%;" class="form-made" data-validate="Department is required">
                         <span class="details">Department:</span>
-                          <select name="department" required>
+                          <select name="department" id="reg-department" required>
                             {% if departments %}
                             {% for depart in departments %}
-                            <option> {{ depart.dept_name }} </option>
+                            <option value="{{ depart.dept_name }}">{{ depart.dept_name }}</option>
                             {% endfor %}
                             {% endif %}
                           </select>
                     </div>
 
-                    <div style="margin-top:25px;position:relative; width: 100%;" class="form-made" data-validate="Department is required">
+                    <div style="margin-top:25px;position:relative; width: 100%;" class="form-made" data-validate="Program is required">
                         <span class="details">Program:</span>
-                        <select name="program" required>
-                            {% if programs %}
-                            {% for program in programs %}
-                            <option> {{ program.program_name }} </option>
-                            {% endfor %}
-                            {% endif %}
-                        </select>
+                        <!-- Populated by JS to only the selected department's programs. -->
+                        <select name="program" id="reg-program" required></select>
                     </div>
-                   
+
+                    {{ programs_by_dept|json_script:"progs-by-dept" }}
 
                     <div class="container-login100-form-btn">
-                        <button class="login100-form-btn">Login</button>
+                        <button class="login100-form-btn">Register</button>
                     </div>
                 </form>
+
+                <script>
+                  // Cascade: show only the selected department's programs.
+                  (function () {
+                    var map = {};
+                    try {
+                      map = JSON.parse(document.getElementById('progs-by-dept').textContent) || {};
+                    } catch (e) { map = {}; }
+                    var deptSel = document.getElementById('reg-department');
+                    var progSel = document.getElementById('reg-program');
+                    function fillPrograms() {
+                      var progs = map[deptSel.value] || [];
+                      progSel.innerHTML = '';
+                      if (!progs.length) {
+                        var o = document.createElement('option');
+                        o.value = ''; o.textContent = '--- No programs ---';
+                        progSel.appendChild(o);
+                        return;
+                      }
+                      progs.forEach(function (name) {
+                        var o = document.createElement('option');
+                        o.value = name; o.textContent = name;
+                        progSel.appendChild(o);
+                      });
+                    }
+                    if (deptSel && progSel) {
+                      deptSel.addEventListener('change', fillPrograms);
+                      fillPrograms();  // initial load for the pre-selected department
+                    }
+                  })();
+                </script>
             </div>
         </div>
     </div>

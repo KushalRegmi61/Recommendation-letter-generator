@@ -56,6 +56,30 @@ def academics_present(gpa, final_percentage):
     return bool((gpa or "").strip() or (final_percentage or "").strip())
 
 
+def normalize_bs_year(value):
+    """Normalize a Bikram Sambat year to a canonical 4-digit string.
+
+    Students enter the same year many ways — ``2080``, ``080``, ``80`` — so
+    the stored value drifts. Collapse them all to the 4-digit form (``2080``)
+    so Enrollment Batch and Passed Year read consistently everywhere.
+
+    Returns the 4-digit string, or ``None`` when the input is blank or cannot
+    be read as a plausible BS year (kept in the 2000–2099 range).
+    """
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if not digits:
+        return None
+    if len(digits) <= 2:
+        digits = "20" + digits.zfill(2)
+    elif len(digits) == 3:
+        digits = "2" + digits
+    elif len(digits) > 4:
+        return None
+    if not (2000 <= int(digits) <= 2099):
+        return None
+    return digits
+
+
 def save_universities(application, rows):
     """Replace all University rows for an application with the given rows.
 

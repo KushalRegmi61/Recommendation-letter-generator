@@ -29,6 +29,16 @@
   .gen-form-card .details { font-weight: 500; margin-bottom: 6px; display: block; }
   .gen-form-card select, .gen-form-card textarea { width: 100%; padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 8px; }
   .gen-form-card .gender-title { font-weight: 600; display: block; margin: 8px 0; }
+
+  /* Note 3 (improvement.docx): declutter the review by hiding the fields and
+     whole cards the student left empty. They stay in the DOM — still editable —
+     and the "Show empty fields" toggle reveals them, so the professor can fill
+     anything in before generating the letter. */
+  .gen .opt-empty { display: none; }
+  .gen .opt-empty-card { display: none; }
+  .gen.show-empty .opt-empty { display: block; }
+  .gen.show-empty .opt-empty-card { display: block; }
+  .empty-toggle-bar { margin: 6px 0 -4px; }
 </style>
 
 <form method="POST" id="recommendationForm" action="/renderCustom">
@@ -100,7 +110,7 @@
       <p class="text-muted mb-0 mt-2" style="font-size:.78rem;">Enter a GPA or a final percentage — at least one is required.</p>
     </div>
 
-    <div class="surface detail-card">
+    <div class="surface detail-card" data-keep-card>
       <h3><i class="bi bi-people"></i> Relationship with you</h3>
       <dl class="kv">
         <dt>Years known/taught</dt><dd><input type="text" name="yrs" value="{{ student.years_taught|default:'' }}"></dd>
@@ -119,7 +129,7 @@
       </div>
     </div>
 
-    <div class="surface detail-card">
+    <div class="surface detail-card" data-keep>
       <h3><i class="bi bi-building"></i> Universities applied</h3>
       <div id="prof-universities">
         {% for u in universities %}
@@ -155,7 +165,7 @@
       </div>
     </div>
 
-    <div class="surface detail-card">
+    <div class="surface detail-card" data-keep-card>
       <h3><i class="bi bi-kanban"></i> Projects</h3>
       <div class="field-full">
         <label>Supervised project</label>
@@ -193,7 +203,7 @@
       </div>
     </div>
 
-    <div class="surface detail-card">
+    <div class="surface detail-card" data-keep-card>
       <h3><i class="bi bi-stars"></i> Personal qualities (self-reported)</h3>
       <div class="badges mb-2">
         {% if quality.leadership %}<span class="badge-q">Leadership</span>{% endif %}
@@ -228,7 +238,7 @@
       </div>
     </div>
 
-    <div class="surface detail-card">
+    <div class="surface detail-card" data-keep>
       <h3><i class="bi bi-paperclip"></i> Documents</h3>
       <div class="doc-actions">
         {% if files.transcript %}
@@ -328,5 +338,87 @@
       if (rows.length > 1) e.target.closest('.uni-row').remove();
     }
   });
+</script>
+
+<script>
+  // Note 3 (improvement.docx): collapse the fields/cards the student left empty
+  // so the review reads cleanly. Nothing is removed from the DOM — a toggle
+  // reveals the empty fields so the professor can still fill them in.
+  (function () {
+    var grid = document.querySelector('.detail-grid');
+    if (!grid) return;
+
+    // A wrapper (a .field-full or a kv <dd>) counts as empty when its editable
+    // controls are all blank. Selects (e.g. the GPA/% picker) never collapse.
+    function isEmpty(wrap) {
+      var controls = wrap.querySelectorAll('input, textarea, select');
+      if (!controls.length) {
+        var t = (wrap.textContent || '').trim();
+        return t === '' || t === '—';   // em dash placeholder
+      }
+      var hasValue = false;
+      for (var i = 0; i < controls.length; i++) {
+        var c = controls[i];
+        if (c.tagName === 'SELECT') return false;           // keep select fields
+        if (c.type === 'file' || c.type === 'button' || c.type === 'submit') continue;
+        if (c.type === 'checkbox' || c.type === 'radio') { if (c.checked) hasValue = true; continue; }
+        if ((c.value || '').trim() !== '') hasValue = true;
+      }
+      return !hasValue;
+    }
+
+    var anyHidden = false;
+
+    grid.querySelectorAll('.detail-card').forEach(function (card) {
+      if (card.hasAttribute('data-keep')) return;   // universities / documents
+
+      var wrappers = [];
+      card.querySelectorAll('.field-full').forEach(function (ff) { wrappers.push({ el: ff, hide: [ff] }); });
+      var dl = card.querySelector('dl.kv');
+      if (dl) {
+        var kids = Array.prototype.slice.call(dl.children);
+        for (var i = 0; i < kids.length; i++) {
+          if (kids[i].tagName === 'DT' && kids[i + 1] && kids[i + 1].tagName === 'DD') {
+            wrappers.push({ el: kids[i + 1], hide: [kids[i], kids[i + 1]] });
+            i++;
+          }
+        }
+      }
+
+      var total = 0, empties = 0;
+      wrappers.forEach(function (w) {
+        total++;
+        if (isEmpty(w.el)) {
+          empties++;
+          w.hide.forEach(function (n) { n.classList.add('opt-empty'); });
+        }
+      });
+
+      // Hide the whole card only when every collapsible field is empty and the
+      // card is not flagged to always keep its shell.
+      if (total > 0 && empties === total && !card.hasAttribute('data-keep-card')) {
+        card.classList.add('opt-empty-card');
+      }
+      if (empties > 0) anyHidden = true;
+    });
+
+    if (!anyHidden) return;
+
+    // Toggle button, placed just above the grid.
+    var bar = document.createElement('div');
+    bar.className = 'empty-toggle-bar';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline-primary';
+    btn.textContent = 'Show empty fields';
+    var shown = false;
+    btn.addEventListener('click', function () {
+      shown = !shown;
+      document.querySelector('.gen').classList.toggle('show-empty', shown);
+      btn.textContent = shown ? 'Hide empty fields' : 'Show empty fields';
+    });
+    bar.appendChild(btn);
+    grid.parentNode.insertBefore(bar, grid);
+  })();
 </script>
 {% endblock body %}

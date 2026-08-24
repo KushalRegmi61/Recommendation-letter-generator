@@ -24,7 +24,17 @@
           /* Scoped to this form so the shared style.css and other pages are untouched. */
           .lor-form .user-details { row-gap: 4px; }
 
-          /* Section headers — themed to the site's purple/blue accent. */
+          /* Widen just this page's card so the form uses more of the screen width.
+             Targets only the container that holds this form (:has), leaving the
+             shared 700px .container width on every other page intact. */
+          .container:has(.lor-form) {
+            max-width: 1100px;
+          }
+          @media (max-width: 1140px) {
+            .container:has(.lor-form) { max-width: 96%; }
+          }
+
+          /* Section headers — themed to the TU red/blue accent. */
           .lor-form .form-section-title {
             width: 100%;
             margin: 26px 0 14px;
@@ -33,8 +43,8 @@
             font-weight: 600;
             letter-spacing: 0.6px;
             text-transform: uppercase;
-            color: #8e44ad;
-            border-bottom: 2px solid #efe6f4;
+            color: var(--tu-red);
+            border-bottom: 2px solid #e6eef7;
             position: relative;
           }
           .lor-form .form-section-title::after {
@@ -43,7 +53,7 @@
             left: 0; bottom: -2px;
             height: 2px; width: 56px;
             border-radius: 2px;
-            background: linear-gradient(135deg, #71b7e6, #c36cbb);
+            background: var(--tu-gradient);
           }
           .lor-form .form-section-title:first-of-type { margin-top: 6px; }
 
@@ -75,18 +85,18 @@
           .lor-form .input-box input:focus,
           .lor-form .input-box select:focus,
           .lor-form .input-box textarea:focus {
-            border-color: #9b59b6;
-            box-shadow: 0 0 0 3px rgba(155, 89, 182, 0.12);
+            border-color: var(--tu-blue-dark);
+            box-shadow: 0 0 0 3px var(--tu-ring);
           }
           /* Don't tint every filled field green (the old :valid rule): keep it neutral. */
           .lor-form .input-box input:valid,
           .lor-form .input-box select:valid { border-color: #d7d7e0; }
           .lor-form .input-box input:focus:valid,
-          .lor-form .input-box select:focus:valid { border-color: #9b59b6; }
+          .lor-form .input-box select:focus:valid { border-color: var(--tu-blue-dark); }
 
           .lor-form .input-box input[type="file"] {
             padding: 9px 12px;
-            background: #faf7fc;
+            background: var(--tu-blue-tint);
             cursor: pointer;
           }
           .lor-form .input-box input[type="file"]::file-selector-button {
@@ -97,7 +107,7 @@
             color: #fff;
             font-weight: 500;
             cursor: pointer;
-            background: linear-gradient(135deg, #71b7e6, #c36cbb);
+            background: var(--tu-gradient);
           }
 
           /* Long-form fields read better full width. */
@@ -108,8 +118,8 @@
           /* Roles / checkbox group card. */
           .lor-form .gender-details {
             width: 100%;
-            background: #faf7fc;
-            border: 1px solid #efe6f4;
+            background: var(--tu-blue-tint);
+            border: 1px solid #dce6f4;
             border-radius: 8px;
             padding: 14px 16px;
             margin-bottom: 15px;
@@ -132,14 +142,14 @@
           .lor-form #add-uni {
             margin-top: 4px;
             padding: 8px 14px;
-            border: 1px dashed #b98fd0;
+            border: 1px dashed var(--tu-blue);
             border-radius: 6px;
             background: #fff;
-            color: #8e44ad;
+            color: var(--tu-red-dark);
             font-weight: 500;
             cursor: pointer;
           }
-          .lor-form #add-uni:hover { background: #faf7fc; }
+          .lor-form #add-uni:hover { background: var(--tu-blue-tint); }
           .lor-form .uni-row .remove-uni {
             border: 1px solid #e3b7b7;
             border-radius: 6px;
@@ -152,46 +162,7 @@
         </style>
         <div class="user-details">
 
-          <!-- ============ Priority 1 — Student Identification & Contact ============ -->
-          <div class="form-section-title">Student Identification &amp; Contact</div>
-
-          <div class="input-box">
-            <span class="details">First Name *</span>
-            <input type="text" placeholder="First Name" name="first_name" value="{{ application.first_name|default:'' }}" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Middle Name</span>
-            <input type="text" placeholder="Middle Name" name="middle_name" value="{{ application.middle_name|default:'' }}">
-          </div>
-
-          <div class="input-box">
-            <span class="details">Last Name *</span>
-            <input type="text" placeholder="Last Name" name="last_name" value="{{ application.last_name|default:'' }}" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Email *</span>
-            <input type="email" placeholder="Email" name="email" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Contact Number *</span>
-            <input type="tel" placeholder="e.g. 9800000000" name="contact_number" value="{{ application.contact_number|default:'' }}" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Gender *</span>
-            <select name="gender" required>
-              <option value="">--- Select ---</option>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-              <option value="Other">Other</option>
-              <option value="Prefer not to say">Prefer not to say</option>
-            </select>
-          </div>
-
-          <!-- ============ Priority 2 — Application Information ============ -->
+          <!-- ================= Page 1 — Application Information ================= -->
           <div class="form-section-title">Application Information</div>
 
           <div class="input-box">
@@ -203,6 +174,11 @@
                {% endfor %}
              </select>
            </div>
+
+          <div class="input-box">
+            <span class="details">Email *</span>
+            <input type="email" placeholder="Email" name="email" required>
+          </div>
 
           <div class="input-box">
             <span class="details">Programs Applied (Level) *</span>
@@ -229,76 +205,45 @@
               </div>
             </div>
             <button type="button" id="add-uni">+ Add another university</button>
-            <small style="color:#777;font-size:12px;">The earliest deadline above is taken as your first deadline.</small>
+            <small style="color:#777;font-size:12px;">Your <strong>first deadline</strong> is taken as the earliest deadline entered above.</small>
           </div>
 
-          <!-- ============ Priority 3 — Academic Information ============ -->
-          <div class="form-section-title">Academic Information</div>
+          <!-- ================= Page 2 — Personal Information ================= -->
+          <div class="form-section-title">Personal Information</div>
 
           <div class="input-box">
-            <span class="details">Program *</span>
-            <input type="text" placeholder="e.g. BCT, BEX" name="program" value="{{ application.program|default:'' }}" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Enrollment Batch *</span>
-            <input type="text" placeholder="e.g. 075" name="enrollment_batch" required>
+            <span class="details">First Name *</span>
+            <input type="text" placeholder="First Name" name="first_name" value="{{ application.first_name|default:'' }}" required>
           </div>
 
           <div class="input-box">
-            <span class="details">Passed Year</span>
-            <input type="text" placeholder="e.g. 2079" name="passed_year">
+            <span class="details">Middle Name</span>
+            <input type="text" placeholder="Middle Name" name="middle_name" value="{{ application.middle_name|default:'' }}">
           </div>
 
           <div class="input-box">
-            <span class="details">Final Percentage Score / GPA *</span>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <select id="score_type" style="flex:0 0 auto; width:auto;">
-                <option value="gpa" selected>GPA</option>
-                <option value="final_percentage">Percentage</option>
-              </select>
-              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
-            </div>
-            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
-            <input type="hidden" name="gpa">
-            <input type="hidden" name="final_percentage">
+            <span class="details">Last Name *</span>
+            <input type="text" placeholder="Last Name" name="last_name" value="{{ application.last_name|default:'' }}" required>
           </div>
-
-          <div class="input-box" >
-          <div class="multiselect">
-          <div class="selectBox" onclick="showCheckboxes()" >
-           <span class="details">Courses Taught (Subjects) *</span>
-            <select name="subject" id="subject"  required>
-            </select>
-            <div class="overSelect"></div>
-          </div>
-          <div id="checkboxes">
-            <span  id="one">
-            </span>
-          </div>
-          </div>
-        </div>
 
           <div class="input-box">
-            <span class="details">Tentative Ranking *</span>
-            <select name="tentative_ranking" required>
-              <option></option>
-              <option>Batch Topper</option>
-              <option>Top 5%</option>
-              <option>Top 10%</option>
-              <option>Top 20%</option>
-              <option>Top 30%</option>
-              <option>Top 40%</option>
+            <span class="details">Contact Number *</span>
+            <input type="tel" placeholder="e.g. 9800000000" name="contact_number" value="{{ application.contact_number|default:'' }}" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Gender *</span>
+            <select name="gender" required>
+              <option value="">--- Select ---</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+              <option value="Prefer not to say">Prefer not to say</option>
             </select>
           </div>
 
-          <!-- ============ Priority 4 — Relationship With Recommender ============ -->
-          <div class="form-section-title">Relationship With Recommender</div>
-
-          <div class="input-box">
-            <span class="details">Relationship to professor</span>
-            <input type="text" name="relationship_type" placeholder="e.g. instructor, advisor" />
-          </div>
+          <!-- =========== Page 3 — Relationship & Academic Background =========== -->
+          <div class="form-section-title">Relationship &amp; Academic Background</div>
 
           <div class="gender-details">
             <span class="gender-title">Role — how does the professor know you? *</span>
@@ -331,8 +276,71 @@
             </select>
           </div>
 
-          <!-- ============ Priority 5 — Main Recommendation Content ============ -->
-          <div class="form-section-title">Main Recommendation Content</div>
+          <div class="input-box" >
+          <div class="multiselect">
+          <div class="selectBox" onclick="showCheckboxes()" >
+           <span class="details">Courses Taught (Subjects) *</span>
+            <select name="subject" id="subject"  required>
+            </select>
+            <div class="overSelect"></div>
+          </div>
+          <div id="checkboxes">
+            <span  id="one">
+            </span>
+          </div>
+          </div>
+        </div>
+
+          <div class="input-box">
+            <span class="details">Program *</span>
+            <input type="text" placeholder="e.g. BCT, BEX" name="program" value="{{ application.program|default:'' }}" required>
+          </div>
+
+          <!-- Enrollment Batch & Passed Year are BS years. The form nudges toward a
+               single 4-digit form (2080); the server normalizes 080 / 80 → 2080 too. -->
+          <div class="input-box">
+            <span class="details">Enrollment Batch (BS year) *</span>
+            <input type="text" class="bs-year" placeholder="e.g. 2080" name="enrollment_batch"
+                   inputmode="numeric" maxlength="4" required>
+            <small style="color:#777;font-size:12px;">Use a 4-digit Bikram Sambat year, e.g. 2080.</small>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Passed Year (BS year)</span>
+            <input type="text" class="bs-year" placeholder="e.g. 2079" name="passed_year"
+                   inputmode="numeric" maxlength="4">
+            <small style="color:#777;font-size:12px;">Optional. 4-digit Bikram Sambat year, e.g. 2079.</small>
+          </div>
+
+          <!-- =========== Page 4 — Recommendation Information =========== -->
+          <div class="form-section-title">Recommendation Information</div>
+
+          <div class="input-box">
+            <span class="details">Final Percentage Score / GPA *</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="score_type" style="flex:0 0 auto; width:auto;">
+                <option value="gpa" selected>GPA</option>
+                <option value="final_percentage">Percentage</option>
+              </select>
+              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
+            </div>
+            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
+            <input type="hidden" name="gpa">
+            <input type="hidden" name="final_percentage">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Tentative Ranking *</span>
+            <select name="tentative_ranking" required>
+              <option></option>
+              <option>Batch Topper</option>
+              <option>Top 5%</option>
+              <option>Top 10%</option>
+              <option>Top 20%</option>
+              <option>Top 30%</option>
+              <option>Top 40%</option>
+            </select>
+          </div>
 
           <div class="input-box">
             <span class="details">Final Year Project / MSc Thesis *</span>
@@ -340,22 +348,9 @@
           </div>
 
           <div class="input-box">
-            <span class="details">Strong Points *</span>
-            <textarea name="strong_points" rows="3" placeholder="What are your key strengths?" required>{{ application.strong_points|default:'' }}</textarea>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Weak Points *</span>
-            <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required>{{ application.weak_points|default:'' }}</textarea>
-          </div>
-
-          <div class="input-box">
             <span class="details">Other Research or Project Work</span>
             <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
           </div>
-
-          <!-- ============ Priority 6 — Supporting Achievements ============ -->
-          <div class="form-section-title">Supporting Achievements</div>
 
           <div class="input-box">
             <span class="details">Published Papers *</span>
@@ -377,7 +372,17 @@
           </div>
 
           <div class="input-box">
-            <span class="details">Professional Experience</span>
+            <span class="details">Strong Points *</span>
+            <textarea name="strong_points" rows="3" placeholder="What are your key strengths?" required>{{ application.strong_points|default:'' }}</textarea>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Weak Points *</span>
+            <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required>{{ application.weak_points|default:'' }}</textarea>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Professional Experience / Internship</span>
             <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc.">{{ application.professional_experience|default:'' }}</textarea>
           </div>
 
@@ -385,9 +390,6 @@
             <span class="details">Extracurricular Activities and Awards *</span>
             <textarea name="eca" rows="4" required></textarea>
           </div>
-
-          <!-- ============ Priority 7 — Supporting Documents ============ -->
-          <div class="form-section-title">Supporting Documents</div>
 
           <div class="input-box">
             <span class="details">Transcript *</span>
@@ -413,9 +415,6 @@
           <div class="input-box">
             <input type="hidden" value="{{naam}}" name="naam" readonly>
           </div>
-
-
-          
 
           <div class="button">
             <input type="submit" value="  Submit  " />
@@ -526,6 +525,26 @@ expanded = false;
       typeSel.addEventListener('change', route);
       valInput.addEventListener('input', route);
       route();
+    })();
+
+    // Normalize BS-year inputs (080 / 80 → 2080) so the batch/passed year are
+    // stored consistently. The server applies the same rule as the source of truth.
+    (function () {
+      function normalizeBsYear(raw) {
+        var d = (raw || '').replace(/\D/g, '');
+        if (!d) return '';
+        if (d.length <= 2) d = '20' + ('0' + d).slice(-2);
+        else if (d.length === 3) d = '2' + d;
+        else if (d.length > 4) return raw;
+        var y = parseInt(d, 10);
+        if (y < 2000 || y > 2099) return raw;
+        return d;
+      }
+      document.querySelectorAll('input.bs-year').forEach(function (el) {
+        el.addEventListener('blur', function () {
+          el.value = normalizeBsYear(el.value);
+        });
+      });
     })();
   </script>
 

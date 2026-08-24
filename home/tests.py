@@ -399,21 +399,145 @@ class Studentform1RenderTests(TestCase):
             'name="intern_company"', 'name="intern_role"',
             'name="intern_duration"', 'name="intern_outcome"',
             'name="deploy"', 'name="is_project"',
+            # The free-text "relationship" field is dropped as a duplicate of the
+            # Role checkboxes (name="known_roles"); only the checkboxes remain.
+            'name="relationship_type"',
         ]:
             self.assertNotIn(field, html, f"field should be removed: {field}")
 
-    def test_form_sections_are_in_backlog_priority_order(self):
+    def test_form_sections_are_in_the_four_page_order(self):
         login_as_student(self.client, self.student)
         html = self.client.get("/studentform1").content.decode()
         sections = [
-            "Student Identification", "Application Information",
-            "Academic Information", "Relationship With Recommender",
-            "Main Recommendation Content", "Supporting Achievements",
-            "Supporting Documents",
+            "Application Information", "Personal Information",
+            "Relationship &amp; Academic Background", "Recommendation Information",
         ]
         positions = [html.find(s) for s in sections]
         self.assertTrue(all(p != -1 for p in positions), "a section title is missing")
-        self.assertEqual(positions, sorted(positions), "sections are out of priority order")
+        self.assertEqual(positions, sorted(positions), "sections are out of page order")
+
+
+class NormalizeBsYearTests(SimpleTestCase):
+    def test_four_digit_year_is_unchanged(self):
+        from home.intake import normalize_bs_year
+        self.assertEqual(normalize_bs_year("2080"), "2080")
+
+    def test_three_digit_year_gets_a_leading_two(self):
+        from home.intake import normalize_bs_year
+        self.assertEqual(normalize_bs_year("080"), "2080")
+
+    def test_two_digit_year_is_expanded(self):
+        from home.intake import normalize_bs_year
+        self.assertEqual(normalize_bs_year("80"), "2080")
+        self.assertEqual(normalize_bs_year("79"), "2079")
+
+    def test_blank_or_none_is_none(self):
+        from home.intake import normalize_bs_year
+        self.assertIsNone(normalize_bs_year(""))
+        self.assertIsNone(normalize_bs_year(None))
+
+    def test_out_of_range_or_junk_is_none(self):
+        from home.intake import normalize_bs_year
+        self.assertIsNone(normalize_bs_year("12345"))  # too many digits
+        self.assertIsNone(normalize_bs_year("abc"))    # no digits
+        self.assertIsNone(normalize_bs_year("1999"))   # below the BS range
+
+
+class StudentApplicationBsYearAndRoleTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BME")
+        self.program = Program.objects.create(program_name="BE7", department=self.dept)
+        self.student = StudentLoginInfo.objects.create(
+            username="guru", roll_number="075BME006",
+            department=self.dept, program=self.program, dob="2000-01-01",
+        )
+        self.prof = TeacherInfo.objects.create(
+            unique_id="77777", name="Dr Rana", email="r@example.com",
+            department=self.dept,
+        )
+        login_as_student(self.client, self.student)
+
+    def _payload(self, **overrides):
+        data = {
+            "prof": "Dr Rana|77777",
+            "email": "guru@example.com",
+            "first_name": "Guru", "middle_name": "", "last_name": "Rai",
+            "contact_number": "9800000000", "applied_level": "Masters",
+            "known_roles": ["thesis supervisor", "instructor"],
+            "yrs": "3", "enrollment_batch": "2080", "passed_year": "2079",
+            "strong_points": "x", "weak_points": "y",
+            "has_paper": "No", "sproject": "P",
+            "uni_name": ["MIT"], "uni_country": ["USA"],
+            "uni_program": ["MS CS"], "uni_deadline": ["2026-12-15"],
+            "gpa": "3.8", "final_percentage": "", "tentative_ranking": "Top 5%",
+            "eca": "Robotics club",
+        }
+        data.update(overrides)
+        return data
+
+    def test_batch_typed_as_three_digits_is_stored_as_four(self):
+        self.client.post("/studentform1", data=self._payload(enrollment_batch="080"))
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        self.assertEqual(app.enrollment_batch, "2080")
+
+    def test_batch_typed_as_two_digits_is_stored_as_four(self):
+        self.client.post("/studentform1", data=self._payload(enrollment_batch="80"))
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        self.assertEqual(app.enrollment_batch, "2080")
+
+    def test_invalid_batch_is_rejected_and_no_application_saved(self):
+        resp = self.client.post("/studentform1", data=self._payload(enrollment_batch="notayear"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Application.objects.filter(std=self.student).exists())
+
+    def test_blank_passed_year_is_allowed(self):
+        resp = self.client.post("/studentform1", data=self._payload(passed_year=""))
+        self.assertEqual(resp.status_code, 200)
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        self.assertEqual(app.passed_year, "")
+
+    def test_relationship_type_is_derived_from_the_first_role(self):
+        # The free-text field is gone; relationship_type is derived so the
+        # letter's rel_desc still reads naturally.
+        self.client.post("/studentform1", data=self._payload(
+            known_roles=["thesis supervisor", "instructor"]))
+        app = Application.objects.get(std=self.student, professor=self.prof)
+        self.assertEqual(app.relationship_type, "thesis supervisor")
+
+
+class PulchowkDepartmentSeedTests(TestCase):
+    """The 0020 data migration seeds the Pulchowk Campus departments/programs."""
+
+    EXPECTED = {
+        "Civil": {"BCE"},
+        "Electronics and Computer": {"BCT", "BEI"},
+        "Electrical": {"BEL"},
+        "Mechanical and Aerospace": {"BME", "BAME"},
+        "Chemical Engineering": {"BCH"},
+        "Architecture": {"BArch"},
+    }
+
+    def test_all_expected_departments_and_programs_exist(self):
+        for dept_name, progs in self.EXPECTED.items():
+            dept = Department.objects.filter(dept_name=dept_name).first()
+            self.assertIsNotNone(dept, f"missing department: {dept_name}")
+            got = set(
+                Program.objects.filter(department=dept)
+                .values_list("program_name", flat=True)
+            )
+            self.assertTrue(
+                progs.issubset(got), f"{dept_name} missing {progs - got}"
+            )
+
+    def test_junk_zz_department_is_absent(self):
+        self.assertFalse(Department.objects.filter(dept_name="ZZ").exists())
+
+    def test_register_page_exposes_programs_by_department(self):
+        resp = self.client.get("/registerStudent")
+        self.assertEqual(resp.status_code, 200)
+        mapping = resp.context["programs_by_dept"]
+        self.assertEqual(set(mapping["Architecture"]), {"BArch"})
+        self.assertEqual(set(mapping["Mechanical and Aerospace"]), {"BME", "BAME"})
 
 
 class ApplicationFilterTests(TestCase):
