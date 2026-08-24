@@ -35,10 +35,10 @@ no front-end build step.
 ## Existing surface (integration points)
 
 - Model `CustomTemplates(template_name, template: TextField, professor FK, is_default, is_system)`.
-- Views: `template` (save, POST `makeTemplate`), `getTemplate` (load body), `renderCustom`
+- Views: `template` (renders the editor page, GET `makeTemplate`), `getTemplate` (the **save** handler, POST `getTemplate`), `renderCustom`
   (generate-page render), `duplicate_template`, `delete_template`, `set_default_template`.
 - Rendering: `home/letters.py` — `SandboxedEnvironment().from_string(tpl).render(ctx)`;
-  `build_context(application)` (~line 96) returns the render context. Its top-level keys are the
+  `build_letter_context(application)` returns the render context. Its top-level keys are the
   allowed variable set: `student`, `app`, `subjects`, `subject`, `value`, `subjects_sentence`,
   `firstname`, `paper`, `project`, `university`, `quality`, `academics`, `files`, `teacher`,
   `pronoun`, `pronoun_obj`, `pronoun_pos`, `rel_desc`, `strength_phrase`, `deadline`, `today`.
@@ -74,7 +74,7 @@ FIELDS = [
 ```
 
 The exact rows are finalised in the plan; the invariant is: **every row's top-level name (the part
-before the first `.` or `|`) must be a key returned by `build_context`.** A test enforces this so
+before the first `.` or `|`) must be a key returned by `build_letter_context`.** A test enforces this so
 the palette can never offer a variable that doesn't exist. A helper `grouped_fields()` returns the
 rows grouped by `group` (ordered) for the template to render the dropdown.
 
@@ -87,7 +87,7 @@ def validate_template(source: str) -> tuple[list[str], list[str]]:
 
 - Compile `SandboxedEnvironment().parse(source)` / `from_string(source)`; a `TemplateSyntaxError`
   (unbalanced or invalid tag) → one **error** carrying the message. Errors block the save.
-- `jinja2.meta.find_undeclared_variables(ast)` minus the allowed top-level set (build_context keys)
+- `jinja2.meta.find_undeclared_variables(ast)` minus the allowed top-level set (build_letter_context keys)
   → each remaining name is a **warning** ("Unknown field: `nmae` — it will render empty"). Warnings
   do **not** block the save (Jinja renders unknown vars as empty by default).
 
@@ -95,13 +95,13 @@ def validate_template(source: str) -> tuple[list[str], list[str]]:
 
 ```python
 def sample_context() -> dict:
-    """A dummy render context mirroring build_context's shape for previews."""
+    """A dummy render context mirroring build_letter_context's shape for previews."""
 ```
 
 Built from `types.SimpleNamespace` (and small stand-ins) so attribute access used in templates
 resolves — `app.name`, `app.std.program.program_name`, `academics.gpa`, `teacher.name`, etc. — with
 realistic placeholder values (e.g. "Asmita Sharma", GPA "3.82"). Shares the same key set as
-`build_context`. Never touches the database and never exposes a real student.
+`build_letter_context`. Never touches the database and never exposes a real student.
 
 ### 4. Preview view — `home/views.py` + `home/urls.py`
 
@@ -114,13 +114,13 @@ New `preview_template` (POST `previewTemplate`):
 - `mode == "sample"`: render `content` against `sample_context()`.
 - `mode == "application"`: load the application via
   `get_object_or_404(Application, pk=application_id, professor=teacher)` (own-only), build its
-  context with the existing `build_context`, render. A malformed/foreign id is a 404, never
+  context with the existing `build_letter_context`, render. A malformed/foreign id is a 404, never
   another professor's data.
 - Returns the rendered letter HTML (shown in a modal on the page). `renderCustom` is untouched.
 
 ### 5. Save flow — `home/views.py` (`template`)
 
-On save, call `validate_template(content)` before writing:
+On save (`getTemplate`), call `validate_template(content)` before writing. Also drop the TinyMCE HTML-artifact cleanup (`<p>&nbsp;</p>` → `<br>` replacements) — CodeMirror edits plain text, so those replacements are inert at best and corrupt literal markup at worst:
 
 - Any **error** → re-render `customTemplate.html` with the error message and the submitted content
   preserved; **no database write**.
@@ -157,7 +157,7 @@ On save, call `validate_template(content)` before writing:
 
 - `validate_template` (SimpleTestCase, no DB): unbalanced `{% if %}` → one error; unknown var
   `{{ app.nmae }}` → one warning, no error; clean template → `([], [])`.
-- `FIELDS` integrity: every row's top-level name ∈ `build_context` key set (guards drift).
+- `FIELDS` integrity: every row's top-level name ∈ `build_letter_context` key set (guards drift).
 - `sample_context()`: renders the shipped default/system template without raising.
 - `preview_template` view: `mode=sample` → 200 with rendered marker; `mode=application` for a
   foreign/unknown id → 404; logged-out → redirected/blocked, nothing rendered.
@@ -168,7 +168,7 @@ On save, call `validate_template(content)` before writing:
 ## Files
 
 - `home/letters.py` — add `FIELDS`, `grouped_fields()`, `validate_template()`, `sample_context()`.
-- `home/views.py` — add validation to `template` (save); add `preview_template`.
+- `home/views.py` — add validation to `getTemplate` (the save handler); DRY the editor-page context (shared helper used by `template` + `getTemplate` re-renders) to also pass `grouped_fields()` and the professor's own applications; add `preview_template`.
 - `home/urls.py` — add `path('previewTemplate', views.preview_template, name='previewTemplate')`.
 - `templates/customTemplate.html` — TinyMCE → CodeMirror 5, toolbar (Insert field / Insert optional
   section / Preview with sample|application), warnings/errors banner.
