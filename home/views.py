@@ -115,8 +115,11 @@ from home.forms import StudentForm
 from home.dashboard import build_teacher_dashboard_context
 from home.letters import (
     available_templates, build_docx_bytes, build_pdf_bytes,
-    render_letter, select_template, system_templates, visible_to,
+    build_letter_context, grouped_fields, render_letter, render_source,
+    sample_context, select_template, system_templates, validate_template,
+    visible_to,
 )
+from jinja2 import TemplateError
 
 
 
@@ -1347,6 +1350,41 @@ def renderCustom(request):
         # Carried into the download form so the export uses the same template.
         "template_id": template_obj.pk if template_obj else "",
     })
+
+
+def preview_template(request):
+    """Render unsaved editor content against sample or own-application data."""
+    if request.method != "POST":
+        return redirect("/makeTemplate")
+
+    teacher = current_teacher(request)
+    if teacher is None:
+        return redirect("/loginTeacher")
+
+    content = request.POST.get("content") or ""
+    errors, warnings = validate_template(content)
+    if errors:
+        return render(request, "template_preview.html", {"error": " ".join(errors)})
+
+    mode = request.POST.get("mode") or "sample"
+    if mode == "application":
+        app_id = (request.POST.get("application_id") or "").strip()
+        if not app_id.isdigit():
+            raise Http404("No application selected.")
+        # Own applications only: a foreign or unknown id is a 404, never a peek
+        # at another professor's student.
+        application = get_object_or_404(Application, pk=app_id, professor=teacher)
+        context = build_letter_context(application)
+    else:
+        context = sample_context()
+
+    try:
+        letter = render_source(content, context)
+    except TemplateError:
+        return render(request, "template_preview.html",
+                      {"error": "This template could not be rendered."})
+    return render(request, "template_preview.html",
+                  {"letter": letter, "warnings": warnings})
 
 
 def template(request):

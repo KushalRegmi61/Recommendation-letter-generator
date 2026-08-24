@@ -51,6 +51,7 @@ urlpatterns = [
     path('duplicateTemplate', views.duplicate_template, name='duplicateTemplate'),
     path('deleteTemplate', views.delete_template, name='deleteTemplate'),
     path('setDefaultTemplate', views.set_default_template, name='setDefaultTemplate'),
+    path('previewTemplate', views.preview_template, name='previewTemplate'),
     path('loginAdmin', views.admin_login, name='admin_login'),
     path('adminDashboard', views.adminDashboard, name='adminDashboard'),
     

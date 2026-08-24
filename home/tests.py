@@ -4627,3 +4627,58 @@ class ValidateTemplateTests(SimpleTestCase):
         from home.letters import validate_template
         errors, warnings = validate_template("{{ app.name }} {{ teacher.email }}")
         self.assertEqual((errors, warnings), ([], []))
+
+
+class PreviewTemplateTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.program = Program.objects.create(program_name="BE-PC", department=self.dept)
+        self.teacher = TeacherInfo.objects.create(
+            unique_id="TP1", name="Prof P", email="pp@example.com", department=self.dept,
+        )
+        self.student = StudentLoginInfo.objects.create(
+            username="stu", roll_number="080BCT700", department=self.dept,
+            program=self.program, dob="2000-01-01",
+        )
+        self.app = Application.objects.create(
+            std=self.student, professor=self.teacher, name="Stu One",
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_sample_mode_renders_the_posted_content(self):
+        resp = self.client.post("/previewTemplate", {
+            "content": "Hello {{ app.name }} on {{ today }}.", "mode": "sample",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Asmita Sharma")
+
+    def test_application_mode_uses_the_real_student(self):
+        resp = self.client.post("/previewTemplate", {
+            "content": "Hello {{ app.name }}.", "mode": "application",
+            "application_id": str(self.app.pk),
+        })
+        self.assertContains(resp, "Stu One")
+
+    def test_a_foreign_application_is_404(self):
+        other_teacher = TeacherInfo.objects.create(
+            unique_id="TP2", name="Prof Q", email="pq@example.com", department=self.dept,
+        )
+        foreign = Application.objects.create(
+            std=self.student, professor=other_teacher, name="Not Yours",
+        )
+        resp = self.client.post("/previewTemplate", {
+            "content": "x", "mode": "application", "application_id": str(foreign.pk),
+        })
+        self.assertEqual(resp.status_code, 404)
+
+    def test_a_syntax_error_is_reported_not_rendered(self):
+        resp = self.client.post("/previewTemplate", {
+            "content": "{% if academics.gpa %}oops", "mode": "sample",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "syntax")
+
+    def test_logged_out_cannot_preview(self):
+        self.client.cookies.clear()
+        resp = self.client.post("/previewTemplate", {"content": "x", "mode": "sample"})
+        self.assertNotEqual(resp.status_code, 200)

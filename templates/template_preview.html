@@ -1,0 +1,11 @@
+{% if error %}
+  <div class="tpl-preview-error">{{ error }}</div>
+{% else %}
+  {% if warnings %}
+  <div class="tpl-preview-warn">
+    <strong>Warnings:</strong>
+    <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  <pre class="tpl-preview-letter" style="white-space:pre-wrap;font-family:Georgia,serif;">{{ letter }}</pre>
+{% endif %}
