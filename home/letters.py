@@ -8,6 +8,7 @@ import datetime
 import io
 import os
 import re
+from types import SimpleNamespace
 
 import fpdf as _fpdf_module
 from docx import Document
@@ -15,7 +16,7 @@ from fpdf import FPDF
 
 from django.conf import settings
 from django.db.models import Q
-from jinja2 import TemplateError
+from jinja2 import TemplateError, TemplateSyntaxError, meta
 from jinja2.sandbox import SandboxedEnvironment
 
 # Professors author these templates themselves, so the renderer is sandboxed:
@@ -108,9 +109,8 @@ def _field_top_name(expr):
 
 
 def grouped_fields():
-    """``FIELDS`` grouped by group label, preserving first-seen group order."""
-    from collections import OrderedDict
-    groups = OrderedDict()
+    """``FIELDS`` grouped by group label, preserving first-seen order."""
+    groups = {}
     for label, expr, group in FIELDS:
         groups.setdefault(group, []).append({"label": label, "expr": expr})
     return [{"group": g, "fields": items} for g, items in groups.items()]
@@ -123,7 +123,6 @@ def sample_context():
     (``app.name``, ``app.std.program.program_name``, ``academics.gpa`` ...) resolves.
     Touches no database and exposes no real student.
     """
-    from types import SimpleNamespace
     program = SimpleNamespace(program_name="Computer Engineering")
     department = SimpleNamespace(dept_name="Electronics & Computer Engineering")
     std = SimpleNamespace(program=program, department=department, gender="female")
@@ -164,6 +163,37 @@ def sample_context():
         "deadline": "December 15, 2026",
         "today": datetime.date.today().strftime("%B %d, %Y"),
     }
+
+
+def validate_template(source):
+    """Check a template string. Returns ``(errors, warnings)``.
+
+    A non-empty ``errors`` list must block the save. Errors are unbalanced or
+    otherwise invalid Jinja tags (``TemplateSyntaxError``). Warnings are
+    variable names the render context does not provide -- Jinja renders those
+    as empty, so they are surfaced but never block the save.
+    """
+    source = source or ""
+    errors, warnings = [], []
+    try:
+        ast = _JINJA.parse(source)
+    except TemplateSyntaxError as exc:
+        errors.append(f"Template syntax error on line {exc.lineno}: {exc.message}")
+        return errors, warnings
+    allowed = set(sample_context().keys())
+    for name in sorted(meta.find_undeclared_variables(ast)):
+        if name not in allowed:
+            warnings.append(f'Unknown field "{name}" — it will render empty.')
+    return errors, warnings
+
+
+def render_source(source, context):
+    """Render an unsaved template string against ``context``.
+
+    Unlike ``render_letter`` (which swallows errors for saved templates), this
+    lets ``TemplateError`` propagate so the preview endpoint can report it.
+    """
+    return _JINJA.from_string(source).render(context)
 
 
 def build_letter_context(application):

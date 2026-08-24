@@ -4602,3 +4602,28 @@ class TemplateFieldRegistryTests(SimpleTestCase):
         out = _JINJA.from_string(tpl).render(sample_context())
         self.assertIn("Asmita", out)
         self.assertIn("3.82", out)
+
+
+class ValidateTemplateTests(SimpleTestCase):
+    def test_clean_template_has_no_errors_or_warnings(self):
+        from home.letters import validate_template
+        errors, warnings = validate_template("Dear {{ app.name }}, {{ today }}.")
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_unbalanced_tag_is_a_blocking_error(self):
+        from home.letters import validate_template
+        errors, warnings = validate_template("{% if academics.gpa %}hi")  # no endif
+        self.assertTrue(errors)
+        self.assertIn("syntax", errors[0].lower())
+
+    def test_unknown_variable_is_a_non_blocking_warning(self):
+        from home.letters import validate_template
+        errors, warnings = validate_template("Hello {{ nmae }}")
+        self.assertEqual(errors, [])
+        self.assertTrue(any("nmae" in w for w in warnings))
+
+    def test_known_nested_attribute_is_not_warned(self):
+        from home.letters import validate_template
+        errors, warnings = validate_template("{{ app.name }} {{ teacher.email }}")
+        self.assertEqual((errors, warnings), ([], []))
