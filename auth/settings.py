@@ -40,7 +40,12 @@ if _env_path.exists():
         if not _line or _line.startswith("#") or "=" not in _line:
             continue
         _key, _, _value = _line.partition("=")
-        os.environ.setdefault(_key.strip(), _value.strip())
+        _value = _value.strip()
+        # Strip a single pair of matching surrounding quotes, if present, so a
+        # quoted value like DATABASE_URL="postgres://..." loads cleanly.
+        if len(_value) >= 2 and _value[0] == _value[-1] and _value[0] in "\"'":
+            _value = _value[1:-1]
+        os.environ.setdefault(_key.strip(), _value)
 
 
 # Quick-start development settings - unsuitable for production
@@ -144,22 +149,26 @@ WSGI_APPLICATION = 'auth.wsgi.application'
 import dj_database_url
 import os
 
-# DATABASE_URL = os.environ.get('DATABASE_URL')
+# Use the Neon (or any) Postgres pointed to by DATABASE_URL when it is set;
+# fall back to the local SQLite file otherwise (dev / tests without a DB URL).
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# DATABASES = {
-#     'default': dj_database_url.config(
-#         default=DATABASE_URL,
-#         conn_max_age=600
-#     )
-# }
-
-#DEFAULT SQLITE DATABASE
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True,
+        )
     }
-}
+else:
+    # DEFAULT SQLITE DATABASE
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 
