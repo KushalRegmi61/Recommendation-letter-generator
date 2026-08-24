@@ -570,8 +570,6 @@ def studentform1(request):
         request.POST.get("last_name"),
     ) or student.username
 
-    class_size = (request.POST.get("class_size") or "").strip()
-
     with transaction.atomic():
         # One application per (student, professor): resubmitting updates the
         # in-progress row rather than creating a duplicate pending request.
@@ -583,28 +581,16 @@ def studentform1(request):
         info.is_generated = False
         info.years_taught = request.POST.get("yrs")
         info.years_known = request.POST.get("yrs")
-        info.is_pro = request.POST.get("is_project") or "null"
         info.subjects = subjects_csv
         info.is_paper = request.POST.get("has_paper")
-        info.intern = request.POST.get("intern") == "on"
-        info.personal_statement = request.POST.get("personal_statement")
-        info.recommendation_purpose = request.POST.get("recommendation_purpose")
-        info.linkedIn = request.POST.get("linkedIn")
         info.relationship_type = request.POST.get("relationship_type")
-        info.intern_company = request.POST.get("intern_company")
-        info.intern_role = request.POST.get("intern_role")
-        info.intern_duration = request.POST.get("intern_duration")
-        info.intern_outcome = request.POST.get("intern_outcome")
-        info.scholarships = request.POST.get("scholarships")
-        info.competitions_won = request.POST.get("competitions_won")
-        info.class_size = int(class_size) if class_size.isdigit() else None
-        info.ranking_percentile = request.POST.get("ranking_percentile")
-        info.language_instruction = request.POST.get("language_instruction")
         info.first_name = request.POST.get("first_name")
         info.middle_name = request.POST.get("middle_name")
         info.last_name = request.POST.get("last_name")
+        info.gender = request.POST.get("gender")
         info.contact_number = request.POST.get("contact_number")
         info.applied_level = request.POST.get("applied_level")
+        info.program = request.POST.get("program")
         info.known_roles = ",".join(request.POST.getlist("known_roles"))
         info.enrollment_batch = request.POST.get("enrollment_batch")
         info.passed_year = request.POST.get("passed_year")
@@ -619,7 +605,6 @@ def studentform1(request):
                 application=info,
                 supervised_project=request.POST.get("sproject"),
                 final_project=request.POST.get("pro1"),
-                deployed=request.POST.get("deploy") == "on",
             )
 
         Paper.objects.filter(application=info).delete()

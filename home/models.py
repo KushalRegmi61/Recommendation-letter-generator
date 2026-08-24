@@ -127,6 +127,8 @@ class Application(models.Model):
     professional_experience = models.TextField(null=True, blank=True)
     strong_points = models.TextField(null=True, blank=True)
     weak_points = models.TextField(null=True, blank=True)
+    gender = models.CharField(max_length=20, null=True, blank=True)
+    program = models.CharField(max_length=100, null=True, blank=True)
 
     # --- FR-5 generated-letter tracking (populated in Phase 3) ---
     generated_at = models.DateTimeField(null=True, blank=True)

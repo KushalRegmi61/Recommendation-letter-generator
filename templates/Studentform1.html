@@ -18,15 +18,143 @@
     </div>
     {% endif %}
     <div class="content">
-      <form method="POST" action="/studentform1" enctype="multipart/form-data">
+      <form class="lor-form" method="POST" action="/studentform1" enctype="multipart/form-data">
       {% csrf_token %}
-        <div class="user-details">
-          <!-- <div class="input-box">
-            <span class="details">Requesting University</span>
-            <input type="text" placeholder="University Name" name="university" required>
-          </div> -->
+        <style>
+          /* Scoped to this form so the shared style.css and other pages are untouched. */
+          .lor-form .user-details { row-gap: 4px; }
 
-          <!-- FR-2: Personal Info -->
+          /* Section headers — themed to the site's purple/blue accent. */
+          .lor-form .form-section-title {
+            width: 100%;
+            margin: 26px 0 14px;
+            padding-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: #8e44ad;
+            border-bottom: 2px solid #efe6f4;
+            position: relative;
+          }
+          .lor-form .form-section-title::after {
+            content: "";
+            position: absolute;
+            left: 0; bottom: -2px;
+            height: 2px; width: 56px;
+            border-radius: 2px;
+            background: linear-gradient(135deg, #71b7e6, #c36cbb);
+          }
+          .lor-form .form-section-title:first-of-type { margin-top: 6px; }
+
+          /* Consistent control styling across text / select / date / textarea / file. */
+          .lor-form .input-box input,
+          .lor-form .input-box select,
+          .lor-form .input-box textarea {
+            width: 100%;
+            font-size: 15px;
+            color: #333;
+            border: 1px solid #d7d7e0;
+            border-bottom-width: 2px;
+            border-radius: 6px;
+            outline: none;
+            background: #fff;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
+          }
+          .lor-form .input-box input,
+          .lor-form .input-box select {
+            height: 44px;
+            padding: 0 12px;
+          }
+          .lor-form .input-box textarea {
+            padding: 10px 12px;
+            resize: vertical;
+            min-height: 80px;
+            line-height: 1.45;
+          }
+          .lor-form .input-box input:focus,
+          .lor-form .input-box select:focus,
+          .lor-form .input-box textarea:focus {
+            border-color: #9b59b6;
+            box-shadow: 0 0 0 3px rgba(155, 89, 182, 0.12);
+          }
+          /* Don't tint every filled field green (the old :valid rule): keep it neutral. */
+          .lor-form .input-box input:valid,
+          .lor-form .input-box select:valid { border-color: #d7d7e0; }
+          .lor-form .input-box input:focus:valid,
+          .lor-form .input-box select:focus:valid { border-color: #9b59b6; }
+
+          .lor-form .input-box input[type="file"] {
+            padding: 9px 12px;
+            background: #faf7fc;
+            cursor: pointer;
+          }
+          .lor-form .input-box input[type="file"]::file-selector-button {
+            margin-right: 12px;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 5px;
+            color: #fff;
+            font-weight: 500;
+            cursor: pointer;
+            background: linear-gradient(135deg, #71b7e6, #c36cbb);
+          }
+
+          /* Long-form fields read better full width. */
+          .lor-form .input-box:has(textarea) { width: 100%; }
+
+          .lor-form .input-box small { display: block; margin-top: 5px; }
+
+          /* Roles / checkbox group card. */
+          .lor-form .gender-details {
+            width: 100%;
+            background: #faf7fc;
+            border: 1px solid #efe6f4;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 15px;
+          }
+          .lor-form .gender-details .gender-title {
+            font-size: 15px;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 8px;
+          }
+          .lor-form .gender-details .form-check { margin-bottom: 4px; }
+
+          /* Repeatable university rows. */
+          .lor-form .uni-row {
+            background: #fafafc;
+            border: 1px solid #ececf2;
+            border-radius: 8px;
+            padding: 10px;
+          }
+          .lor-form #add-uni {
+            margin-top: 4px;
+            padding: 8px 14px;
+            border: 1px dashed #b98fd0;
+            border-radius: 6px;
+            background: #fff;
+            color: #8e44ad;
+            font-weight: 500;
+            cursor: pointer;
+          }
+          .lor-form #add-uni:hover { background: #faf7fc; }
+          .lor-form .uni-row .remove-uni {
+            border: 1px solid #e3b7b7;
+            border-radius: 6px;
+            background: #fff;
+            color: #b53a3a;
+            padding: 0 12px;
+            cursor: pointer;
+          }
+          .lor-form .uni-row .remove-uni:hover { background: #fdf0f0; }
+        </style>
+        <div class="user-details">
+
+          <!-- ============ Priority 1 — Student Identification & Contact ============ -->
+          <div class="form-section-title">Student Identification &amp; Contact</div>
+
           <div class="input-box">
             <span class="details">First Name *</span>
             <input type="text" placeholder="First Name" name="first_name" value="{{ application.first_name|default:'' }}" required>
@@ -43,14 +171,28 @@
           </div>
 
           <div class="input-box">
+            <span class="details">Email *</span>
+            <input type="email" placeholder="Email" name="email" required>
+          </div>
+
+          <div class="input-box">
             <span class="details">Contact Number *</span>
             <input type="tel" placeholder="e.g. 9800000000" name="contact_number" value="{{ application.contact_number|default:'' }}" required>
           </div>
 
           <div class="input-box">
-            <span class="details">Campus Mail *</span>
-            <input type="email" placeholder="Email" name="email" required>
+            <span class="details">Gender *</span>
+            <select name="gender" required>
+              <option value="">--- Select ---</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+              <option value="Prefer not to say">Prefer not to say</option>
+            </select>
           </div>
+
+          <!-- ============ Priority 2 — Application Information ============ -->
+          <div class="form-section-title">Application Information</div>
 
           <div class="input-box">
             <span class="details">Requesting Professor *</span>
@@ -63,24 +205,103 @@
            </div>
 
           <div class="input-box">
-          <span class="details">Years professor has known you for: *</span>
-            <!-- <input type="text" placeholder="Choose Professor" required> -->
-            <select name="yrs" required>
-              <option></option>
-              <option>1 year</option>
-              <option>2 years</option>
-              <option>3 years</option>
-              <option>4 years</option>
+            <span class="details">Programs Applied (Level) *</span>
+            <select name="applied_level" required>
+              <option value="">--- Select ---</option>
+              <option value="Masters">Masters</option>
+              <option value="PhD">PhD</option>
+              <option value="Both">Both</option>
+              <option value="Other">Other</option>
             </select>
           </div>
+
+          <!-- Universities applied to (repeatable, each needs a deadline).
+               The earliest of these deadlines is used as the "First Deadline". -->
+          <div class="input-box" style="width:100%;">
+            <span class="details">Universities Applied (with deadlines) *</span>
+            <div id="universities">
+              <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                <input type="text" name="uni_name" placeholder="University name" required style="flex:2;min-width:150px;">
+                <input type="text" name="uni_country" placeholder="Country" required style="flex:1;min-width:100px;">
+                <input type="text" name="uni_program" placeholder="Program applied" style="flex:1;min-width:120px;">
+                <input type="date" name="uni_deadline" placeholder="Deadline" required style="flex:1;min-width:130px;">
+                <button type="button" class="remove-uni" style="flex:none;">Remove</button>
+              </div>
+            </div>
+            <button type="button" id="add-uni">+ Add another university</button>
+            <small style="color:#777;font-size:12px;">The earliest deadline above is taken as your first deadline.</small>
+          </div>
+
+          <!-- ============ Priority 3 — Academic Information ============ -->
+          <div class="form-section-title">Academic Information</div>
+
+          <div class="input-box">
+            <span class="details">Program *</span>
+            <input type="text" placeholder="e.g. BCT, BEX" name="program" value="{{ application.program|default:'' }}" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Enrollment Batch *</span>
+            <input type="text" placeholder="e.g. 075" name="enrollment_batch" required>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Passed Year</span>
+            <input type="text" placeholder="e.g. 2079" name="passed_year">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Final Percentage Score / GPA *</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <select id="score_type" style="flex:0 0 auto; width:auto;">
+                <option value="gpa" selected>GPA</option>
+                <option value="final_percentage">Percentage</option>
+              </select>
+              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
+            </div>
+            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
+            <input type="hidden" name="gpa">
+            <input type="hidden" name="final_percentage">
+          </div>
+
+          <div class="input-box" >
+          <div class="multiselect">
+          <div class="selectBox" onclick="showCheckboxes()" >
+           <span class="details">Courses Taught (Subjects) *</span>
+            <select name="subject" id="subject"  required>
+            </select>
+            <div class="overSelect"></div>
+          </div>
+          <div id="checkboxes">
+            <span  id="one">
+            </span>
+          </div>
+          </div>
+        </div>
+
+          <div class="input-box">
+            <span class="details">Tentative Ranking *</span>
+            <select name="tentative_ranking" required>
+              <option></option>
+              <option>Batch Topper</option>
+              <option>Top 5%</option>
+              <option>Top 10%</option>
+              <option>Top 20%</option>
+              <option>Top 30%</option>
+              <option>Top 40%</option>
+            </select>
+          </div>
+
+          <!-- ============ Priority 4 — Relationship With Recommender ============ -->
+          <div class="form-section-title">Relationship With Recommender</div>
+
           <div class="input-box">
             <span class="details">Relationship to professor</span>
             <input type="text" name="relationship_type" placeholder="e.g. instructor, advisor" />
           </div>
 
-          <!-- FR-2: Known roles (multiple checkboxes) -->
           <div class="gender-details">
-            <span class="gender-title">How does the professor know you? *</span>
+            <span class="gender-title">Role — how does the professor know you? *</span>
             <div class="form-check">
               <input class="form-check-input" type="checkbox" name="known_roles" value="instructor" id="role_instructor" />
               <label class="form-check-label" for="role_instructor">Instructor</label>
@@ -99,127 +320,23 @@
             </div>
           </div>
 
-          <!-- FR-2: Enrollment / Academic -->
           <div class="input-box">
-            <span class="details">Enrollment Batch *</span>
-            <input type="text" placeholder="e.g. 075" name="enrollment_batch" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">Passed Year</span>
-            <input type="text" placeholder="e.g. 2079" name="passed_year">
-          </div>
-
-          <!-- FR-2: Applied level -->
-          <div class="input-box">
-            <span class="details">Applying for Level *</span>
-            <select name="applied_level" required>
-              <option value="">--- Select ---</option>
-              <option value="Masters">Masters</option>
-              <option value="PhD">PhD</option>
-              <option value="Both">Both</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-          
-          <div class="input-box" >
-          <div class="multiselect">
-          <div class="selectBox" onclick="showCheckboxes()" >
-           <span class="details">Subjects *</span>
-            <select name="subject" id="subject"  required>
-            </select>
-            <div class="overSelect"></div>
-          </div>
-          <div id="checkboxes">
-            <span  id="one">
-            </span> 
-          </div>
-          </div>
-        </div>
-
-          <div class="input-box">
-            <span class="details">Final Year Project: *</span>
-            <input type="text" name="sproject" value="{{ project.supervised_project|default:'' }}" required>
-          </div>
-
-          <div class="input-box">
-            <span class="details">He/she supervised Final Project? *</span>
-            <select name="is_project" required>
-              <option>Yes</option>
-              <option>No</option>
-            </select>
-          </div>
-          
-          <div class="input-box">
-            <span class="details">Other Project Name(if supervised):</span>
-            <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
-          </div>
-
-          <div class="input-box">
-            <span class="details">Paper Published *</span>
-            <select name="has_paper" required>
+          <span class="details">How long the professor has known you *</span>
+            <select name="yrs" required>
               <option></option>
-              <option>Yes</option>
-              <option>No</option>
+              <option>1 year</option>
+              <option>2 years</option>
+              <option>3 years</option>
+              <option>4 years</option>
             </select>
           </div>
 
-          <div class="input-box">
-            <span class="details">Link for paper (if published):</span>
-            <input type="text" name="paper_link" value="{{ paper.paper_link|default:'' }}">
-          </div>
+          <!-- ============ Priority 5 — Main Recommendation Content ============ -->
+          <div class="form-section-title">Main Recommendation Content</div>
 
           <div class="input-box">
-            <span class="details">Paper Title (if published):</span>
-            <input type="text" name="paper_title" value="{{ paper.paper_title|default:'' }}">
-          </div>
-
-          <!-- LinkedIn Link -->
-          <div class="input-box">
-            <span class="details">LinkedIn Profile Link:</span>
-            <input type="url" placeholder="Enter LinkedIn Profile Link" name="linkedIn" value="{{ application.linkedIn|default:'' }}" />
-          </div>
-
-          <div class="gender-details">
-            <span class="gender-title">Other</span>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="deploy" id="flexCheckDefault" />
-              <label class="form-check-label" for="flexCheckDefault">
-                Deployed a Project
-              </label>
-            </div>
-            
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="intern" id="flexCheckDefault" />
-              <label class="form-check-label" for="flexCheckDefault">
-                Done internship
-              </label>
-            </div>
-          </div>
-          
-          <!-- internship details -->
-          <div class="input-box">
-            <span class="details">Internship Company</span>
-            <input type="text" name="intern_company" />
-          </div>
-          <div class="input-box">
-            <span class="details">Internship Role</span>
-            <input type="text" name="intern_role" />
-          </div>
-          <div class="input-box">
-            <span class="details">Duration</span>
-            <input type="text" name="intern_duration" />
-          </div>
-          <div class="input-box">
-            <span class="details">Outcome</span>
-            <input type="text" name="intern_outcome" />
-          </div>
-
-          
-          <!-- FR-2: Professional background and qualities -->
-          <div class="input-box">
-            <span class="details">Professional Experience</span>
-            <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc.">{{ application.professional_experience|default:'' }}</textarea>
+            <span class="details">Final Year Project / MSc Thesis *</span>
+            <input type="text" name="sproject" value="{{ project.supervised_project|default:'' }}" required>
           </div>
 
           <div class="input-box">
@@ -232,99 +349,45 @@
             <textarea name="weak_points" rows="3" placeholder="What areas are you working to improve?" required>{{ application.weak_points|default:'' }}</textarea>
           </div>
 
-          <!-- Personal Statement -->
-          <style>
-            .input-box textarea {
-              width: 100%;
-              padding: 10px;
-              border: 1px solid #ccc;
-              border-radius: 5px;
-              font-size: 16px;
-              resize: vertical; /* Allows the user to resize the textarea vertically but not horizontally */
-            }
-          </style>
           <div class="input-box">
-            <span class="details">Personal Statement </span>
-            <textarea name="personal_statement" rows="5" >{{ application.personal_statement|default:'' }}</textarea>
-          </div>
-          
-          
-          <!-- Recommendation Purpose -->
-          <br>
-          
-          <div class="input-box" >
-            <span class="details">Recommendation Purpose </span>
-            <textarea name="recommendation_purpose" rows="5">{{ application.recommendation_purpose|default:'' }}</textarea>
-          </div>
-          
-          <!-- awards and academic context -->
-          <div class="input-box">
-            <span class="details">Scholarships / Awards</span>
-            <textarea name="scholarships" rows="3"></textarea>
-          </div>
-          <div class="input-box">
-            <span class="details">Competitions won</span>
-            <textarea name="competitions_won" rows="3"></textarea>
-          </div>
-          <div class="input-box">
-            <span class="details">Class size (approx)</span>
-            <input type="number" name="class_size" />
-          </div>
-          <div class="input-box">
-            <span class="details">Ranking / percentile</span>
-            <input type="text" name="ranking_percentile" />
-          </div>
-          <div class="input-box">
-            <span class="details">Language of instruction</span>
-            <input type="text" name="language_instruction" />
-          </div>
-          
-          <div class="input-box">
-        <span class="details">Photo *</span>
-        <input type="file" name="photo" accept="image/*" required>
-         </div>
-
-          <!-- Universities applied to (repeatable, each needs a deadline) -->
-          <div class="input-box" style="width:100%;">
-            <span class="details">Universities *</span>
-            <div id="universities">
-              <div class="uni-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                <input type="text" name="uni_name" placeholder="University name" required style="flex:2;min-width:150px;">
-                <input type="text" name="uni_country" placeholder="Country" required style="flex:1;min-width:100px;">
-                <input type="text" name="uni_program" placeholder="Program applied" style="flex:1;min-width:120px;">
-                <input type="date" name="uni_deadline" placeholder="Deadline" required style="flex:1;min-width:130px;">
-                <button type="button" class="remove-uni" style="flex:none;">Remove</button>
-              </div>
-            </div>
-            <button type="button" id="add-uni">+ Add another university</button>
+            <span class="details">Other Research or Project Work</span>
+            <input type="text" name="pro1" value="{{ project.final_project|default:'' }}">
           </div>
 
-          <div class="input-box">
-            <span class="details">Academic score *</span>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <select id="score_type" style="flex:0 0 auto; width:auto;">
-                <option value="gpa" selected>GPA</option>
-                <option value="final_percentage">Percentage</option>
-              </select>
-              <input type="text" id="score_value" placeholder="e.g. 3.8" required style="flex:1;">
-            </div>
-            <small style="color:#777;font-size:12px;">Pick GPA or Percentage, then enter the value.</small>
-            <input type="hidden" name="gpa">
-            <input type="hidden" name="final_percentage">
-          </div>
+          <!-- ============ Priority 6 — Supporting Achievements ============ -->
+          <div class="form-section-title">Supporting Achievements</div>
 
           <div class="input-box">
-            <span class="details">Tentative Ranking *</span>
-            <select name="tentative_ranking" required>
+            <span class="details">Published Papers *</span>
+            <select name="has_paper" required>
               <option></option>
-              <option>Batch Topper</option>
-              <option>Top 5%</option>
-              <option>Top 10%</option>
-              <option>Top 20%</option>
-              <option>Top 30%</option>
-              <option>Top 40%</option>
+              <option>Yes</option>
+              <option>No</option>
             </select>
           </div>
+
+          <div class="input-box">
+            <span class="details">Paper Title (if published):</span>
+            <input type="text" name="paper_title" value="{{ paper.paper_title|default:'' }}">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Link for paper (if published):</span>
+            <input type="text" name="paper_link" value="{{ paper.paper_link|default:'' }}">
+          </div>
+
+          <div class="input-box">
+            <span class="details">Professional Experience</span>
+            <textarea name="professional_experience" rows="3" placeholder="Describe any professional work, internships, research, etc.">{{ application.professional_experience|default:'' }}</textarea>
+          </div>
+
+          <div class="input-box">
+            <span class="details">Extracurricular Activities and Awards *</span>
+            <textarea name="eca" rows="4" required></textarea>
+          </div>
+
+          <!-- ============ Priority 7 — Supporting Documents ============ -->
+          <div class="form-section-title">Supporting Documents</div>
 
           <div class="input-box">
             <span class="details">Transcript *</span>
@@ -339,16 +402,10 @@
           </div>
 
           <div class="input-box">
-            <span class="details">Extracurricular Activities *</span>
-            <textarea name="eca" rows="4" required></textarea>
+            <span class="details">Photo *</span>
+            <input type="file" name="photo" accept="image/*" required>
           </div>
 
-
-
-
-
-
-          
           <div class="input-box">
             <input type="hidden" value="{{roll}}" name="roll" readonly>
           </div>

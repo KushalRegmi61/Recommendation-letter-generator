@@ -382,9 +382,38 @@ class Studentform1RenderTests(TestCase):
             'name="contact_number"', 'name="applied_level"', 'name="known_roles"',
             'name="enrollment_batch"', 'name="passed_year"',
             'name="professional_experience"', 'name="strong_points"',
-            'name="weak_points"',
+            'name="weak_points"', 'name="gender"', 'name="program"',
         ]:
             self.assertIn(field, html, f"missing input: {field}")
+
+    def test_form_drops_fields_absent_from_the_backlog(self):
+        # The backlog trims the intake down to its required fields; these extra
+        # inputs must no longer appear on the single-page form.
+        login_as_student(self.client, self.student)
+        html = self.client.get("/studentform1").content.decode()
+        for field in [
+            'name="linkedIn"', 'name="personal_statement"',
+            'name="recommendation_purpose"', 'name="scholarships"',
+            'name="competitions_won"', 'name="class_size"',
+            'name="ranking_percentile"', 'name="language_instruction"',
+            'name="intern_company"', 'name="intern_role"',
+            'name="intern_duration"', 'name="intern_outcome"',
+            'name="deploy"', 'name="is_project"',
+        ]:
+            self.assertNotIn(field, html, f"field should be removed: {field}")
+
+    def test_form_sections_are_in_backlog_priority_order(self):
+        login_as_student(self.client, self.student)
+        html = self.client.get("/studentform1").content.decode()
+        sections = [
+            "Student Identification", "Application Information",
+            "Academic Information", "Relationship With Recommender",
+            "Main Recommendation Content", "Supporting Achievements",
+            "Supporting Documents",
+        ]
+        positions = [html.find(s) for s in sections]
+        self.assertTrue(all(p != -1 for p in positions), "a section title is missing")
+        self.assertEqual(positions, sorted(positions), "sections are out of priority order")
 
 
 class ApplicationFilterTests(TestCase):
