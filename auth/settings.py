@@ -114,6 +114,9 @@ MESSAGE_TAGS = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Serves collected static files (CSS/JS) directly from gunicorn, so the app
+    # works with DEBUG=false without a separate web server / CDN.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -225,6 +228,16 @@ STATICFILES_DIRS = [
     BASE_DIR / "static"
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Compress and hash collected static files; WhiteNoise serves them.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 #to load images from the media directory
 MEDIA_ROOT= os.path.join(BASE_DIR, 'media')

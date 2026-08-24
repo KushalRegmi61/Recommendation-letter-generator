@@ -1,0 +1,18 @@
+# Keep secrets, local state and bulky/dev-only files out of the image.
+.env
+.env.*
+!.env.example
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+db.sqlite3
+staticfiles/
+media/
+node_modules/
+docs/
+googleform-ss/
+*.docx
+CLAUDE.md
+.claude/
