@@ -4682,3 +4682,38 @@ class PreviewTemplateTests(TestCase):
         self.client.cookies.clear()
         resp = self.client.post("/previewTemplate", {"content": "x", "mode": "sample"})
         self.assertNotEqual(resp.status_code, 200)
+
+
+class TemplateSaveValidationTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            unique_id="TS1", name="Prof S", email="ps@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_unbalanced_template_is_rejected_and_not_saved(self):
+        from home.models import CustomTemplates
+        resp = self.client.post("/getTemplate", {
+            "templateName": "Broken", "content": "{% if academics.gpa %}no end",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(
+            CustomTemplates.objects.filter(professor=self.teacher, template_name="Broken").exists()
+        )
+
+    def test_unknown_variable_still_saves_the_template(self):
+        from home.models import CustomTemplates
+        resp = self.client.post("/getTemplate", {
+            "templateName": "Typo", "content": "Hi {{ nmae }}",
+        })
+        self.assertEqual(resp.status_code, 200)
+        tpl = CustomTemplates.objects.get(professor=self.teacher, template_name="Typo")
+        self.assertEqual(tpl.template, "Hi {{ nmae }}")
+
+    def test_editor_page_context_exposes_field_palette_and_applications(self):
+        resp = self.client.get("/makeTemplate")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("field_groups", resp.context)
+        self.assertTrue(resp.context["field_groups"])
+        self.assertIn("applications", resp.context)

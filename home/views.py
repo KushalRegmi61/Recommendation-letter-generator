@@ -1387,17 +1387,32 @@ def preview_template(request):
                   {"letter": letter, "warnings": warnings})
 
 
+def _template_editor_context(teacher, **extra):
+    """Context every render of customTemplate.html needs.
+
+    Centralised so the editor page, the save re-renders and the clash re-render
+    all expose the field palette and the professor's own applications.
+    """
+    ctx = {
+        "professor": teacher,
+        "templates": CustomTemplates.objects.filter(professor=teacher),
+        "system_templates": system_templates().order_by("template_name"),
+        "field_groups": grouped_fields(),
+        "applications": Application.objects.filter(
+            professor=teacher
+        ).order_by("std__roll_number"),
+    }
+    ctx.update(extra)
+    return ctx
+
+
 def template(request):
     """The professor's template editor: their own templates plus the system library."""
     teacher = current_teacher(request)
     if teacher is None:
         return redirect("/loginTeacher")
 
-    return render(request, "customTemplate.html", {
-        "professor": teacher,
-        "templates": CustomTemplates.objects.filter(professor=teacher),
-        "system_templates": system_templates().order_by("template_name"),
-    })
+    return render(request, "customTemplate.html", _template_editor_context(teacher))
 
 
 def getTemplate(request):
@@ -1422,13 +1437,15 @@ def getTemplate(request):
     if name and name.strip().lower() == 'default':
         make_default = True
 
-    # cleanup editor artifacts
-    content = content.replace('<p>&nbsp;</p>\n<p>&nbsp;</p>', '')
-    content = content.replace('<p>&nbsp;</p>', '')
-    content = content.replace('</p>\n<p>', '<br>')
-    content = content.replace('</p>\r\n<p>', '<br>')
-    content = content.replace('</p>\r<p>', '<br>')
-    content = content.replace('<p>', '<p><br>')
+    # CodeMirror edits the raw template, so validate before writing: unbalanced
+    # tags block the save; unknown variables are surfaced as non-blocking
+    # warnings (Jinja renders them empty).
+    errors, warnings = validate_template(content)
+    if errors:
+        return render(request, "customTemplate.html", _template_editor_context(
+            teacher, error=" ".join(errors),
+            submitted_name=name, submitted_content=content,
+        ))
 
     # if requested as default, clear previous defaults for this prof
     if make_default:
@@ -1455,13 +1472,10 @@ def getTemplate(request):
             .exists()
         )
         if clash:
-            messages.error(request, f'You already have a template named "{name}".')
-            return render(request, "customTemplate.html", {
-                "professor": teacher,
-                "templates": CustomTemplates.objects.filter(professor=teacher),
-                "system_templates": system_templates().order_by("template_name"),
-                "template": template_obj,
-            })
+            return render(request, "customTemplate.html", _template_editor_context(
+                teacher, template=template_obj,
+                error=f'You already have a template named "{name}".',
+            ))
         template_obj.template_name = name
         template_obj.template = content
         if make_default:
@@ -1486,12 +1500,9 @@ def getTemplate(request):
                 is_default=make_default,
             )
 
-    return render(request, "customTemplate.html", {
-        'professor': teacher,
-        'templates': CustomTemplates.objects.filter(professor=teacher),
-        'system_templates': system_templates().order_by("template_name"),
-        'template': template_obj,
-    })
+    return render(request, "customTemplate.html", _template_editor_context(
+        teacher, template=template_obj, warnings=warnings,
+    ))
 
 
 def duplicate_template(request):
