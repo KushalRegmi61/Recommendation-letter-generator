@@ -71,6 +71,101 @@ def join_subjects(parts):
     return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
+# --- Phase C: guided template editor -------------------------------------
+
+# The single source of truth mapping a professor-friendly label to the Jinja
+# expression inserted inside {{ }}. Every row's top-level name (the part before
+# the first '.', '|', '[' or space) MUST be a key returned by
+# build_letter_context / sample_context; a test enforces this so the palette can
+# never offer a variable that does not exist.
+FIELDS = [
+    ("Student name",            "app.name",                     "Student"),
+    ("First name",              "firstname",                    "Student"),
+    ("Program",                 "app.std.program.program_name", "Student"),
+    ("Department",              "app.std.department.dept_name", "Student"),
+    ("Ranking percentile",      "app.ranking_percentile",       "Student"),
+    ("Relationship",            "rel_desc",                     "Student"),
+    ("GPA",                     "academics.gpa",                "Academics & Quality"),
+    ("Standout quality",        "quality.quality",              "Academics & Quality"),
+    ("Recommendation strength", "strength_phrase",              "Academics & Quality"),
+    ("Subjects (sentence)",     "subjects_sentence",            "Academics & Quality"),
+    ("Subject",                 "subject",                      "Academics & Quality"),
+    ("Teacher name",            "teacher.name",                 "Teacher"),
+    ("Teacher email",           "teacher.email",                "Teacher"),
+    ("Teacher title",           "teacher.title",                "Teacher"),
+    ("Teacher phone",           "teacher.phone",                "Teacher"),
+    ("Pronoun (he/she)",        "pronoun",                      "Pronouns & Dates"),
+    ("Pronoun (him/her)",       "pronoun_obj",                  "Pronouns & Dates"),
+    ("Pronoun (his/her)",       "pronoun_pos",                  "Pronouns & Dates"),
+    ("Today's date",            "today",                        "Pronouns & Dates"),
+    ("Deadline",                "deadline",                     "Pronouns & Dates"),
+]
+
+
+def _field_top_name(expr):
+    """The top-level context name an expression depends on (``app.std.x`` -> ``app``)."""
+    return re.split(r"[.\|\[ ]", expr.strip(), maxsplit=1)[0]
+
+
+def grouped_fields():
+    """``FIELDS`` grouped by group label, preserving first-seen group order."""
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for label, expr, group in FIELDS:
+        groups.setdefault(group, []).append({"label": label, "expr": expr})
+    return [{"group": g, "fields": items} for g, items in groups.items()]
+
+
+def sample_context():
+    """A dummy render context mirroring build_letter_context's keys, for previews.
+
+    Uses ``SimpleNamespace`` stand-ins so the attribute access the templates use
+    (``app.name``, ``app.std.program.program_name``, ``academics.gpa`` ...) resolves.
+    Touches no database and exposes no real student.
+    """
+    from types import SimpleNamespace
+    program = SimpleNamespace(program_name="Computer Engineering")
+    department = SimpleNamespace(dept_name="Electronics & Computer Engineering")
+    std = SimpleNamespace(program=program, department=department, gender="female")
+    app = SimpleNamespace(
+        name="Asmita Sharma", std=std,
+        relationship_type="project supervisor", ranking_percentile="top 3%",
+    )
+    academics = SimpleNamespace(gpa="3.82", final_percentage="", tentative_ranking="Top 5%")
+    teacher = SimpleNamespace(
+        name="Dr. Rajesh Koirala", email="rajesh@pcampus.edu.np",
+        title="Professor", phone="+977-1-5555555",
+    )
+    quality = SimpleNamespace(
+        quality="a meticulous and endlessly curious engineer",
+        recommendation_strength="top5",
+        leadership=True, hardworking=True, social=False, teamwork=True, friendly=True,
+        presentation="excellent", recommend="strongly",
+    )
+    paper = SimpleNamespace(paper_title="On-Device ML", paper_link="https://example.org/p")
+    project = SimpleNamespace(supervised_project="Autonomous rover",
+                              final_project="", deployed=True)
+    university = SimpleNamespace(uni_name="ETH Zurich", country="Switzerland",
+                                 program_applied="MSc CS", uni_deadline=None)
+    files = SimpleNamespace()
+    parts = ["Data Structures", "Operating Systems", "Machine Learning"]
+    return {
+        "student": app, "app": app,
+        "subjects": parts[:-1], "subject": parts[-1] if parts else "",
+        "value": len(parts) == 1,
+        "subjects_sentence": join_subjects(parts),
+        "firstname": "Asmita",
+        "paper": paper, "project": project, "university": university,
+        "quality": quality, "academics": academics, "files": files,
+        "teacher": teacher,
+        "pronoun": "She", "pronoun_obj": "her", "pronoun_pos": "Her",
+        "rel_desc": "project supervisor",
+        "strength_phrase": STRENGTH_PHRASES["top5"],
+        "deadline": "December 15, 2026",
+        "today": datetime.date.today().strftime("%B %d, %Y"),
+    }
+
+
 def build_letter_context(application):
     """Assemble the dict every letter template renders against."""
     from home.models import (

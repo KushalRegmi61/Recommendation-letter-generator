@@ -4572,3 +4572,33 @@ class MakeLetterEditEntryTests(TestCase):
         resp = self.client.get("/teacher")
         self.assertContains(resp, "makeLetter")
         self.assertContains(resp, "Edit")
+
+
+class TemplateFieldRegistryTests(SimpleTestCase):
+    def test_grouped_fields_groups_in_first_seen_order(self):
+        from home.letters import grouped_fields
+        groups = grouped_fields()
+        names = [g["group"] for g in groups]
+        self.assertEqual(names, list(dict.fromkeys(names)))  # no group repeats
+        self.assertEqual(names[0], "Student")
+        first = groups[0]["fields"][0]
+        self.assertIn("label", first)
+        self.assertIn("expr", first)
+
+    def test_every_field_top_name_is_a_real_context_key(self):
+        from home.letters import FIELDS, sample_context, _field_top_name
+        allowed = set(sample_context().keys())
+        for label, expr, group in FIELDS:
+            self.assertIn(
+                _field_top_name(expr), allowed,
+                f"{label!r} -> {expr!r} references an unknown top-level name",
+            )
+
+    def test_sample_context_renders_a_representative_template(self):
+        from home.letters import sample_context, _JINJA
+        tpl = ("{{ app.name }} in {{ app.std.program.program_name }}; "
+               "GPA {{ academics.gpa }}; {{ teacher.name }}; {{ today }}"
+               "{% if academics.gpa %} ranked {{ app.ranking_percentile }}{% endif %}")
+        out = _JINJA.from_string(tpl).render(sample_context())
+        self.assertIn("Asmita", out)
+        self.assertIn("3.82", out)
