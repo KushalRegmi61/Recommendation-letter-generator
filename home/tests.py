@@ -1119,9 +1119,13 @@ class SystemTemplateModelTests(TestCase):
 class SeededSystemTemplateTests(TestCase):
     """The data migration must ship a usable starter library (FR-1)."""
 
-    def test_three_system_templates_are_seeded(self):
+    def test_system_templates_are_seeded(self):
+        # 0013 seeds three starters; 0021 adds two richer, input-maximizing ones.
         seeded = CustomTemplates.objects.filter(is_system=True)
-        self.assertEqual(seeded.count(), 3)
+        self.assertEqual(seeded.count(), 5)
+        names = set(seeded.values_list("template_name", flat=True))
+        self.assertIn("Comprehensive Reference (Pulchowk)", names)
+        self.assertIn("Graduate Admission (Detailed)", names)
 
     def test_seeded_templates_have_names_and_bodies(self):
         for tpl in CustomTemplates.objects.filter(is_system=True):
@@ -1276,6 +1280,72 @@ class SeededSystemTemplateTests(TestCase):
             for bad in singular_verbs:
                 with self.subTest(name=tpl.template_name, phrase=bad):
                     self.assertNotIn(bad, letter)
+
+    def test_detailed_templates_surface_the_rich_intake_fields(self):
+        """The two 0021 templates should weave in the optional intake fields
+        (strengths, weaknesses, experience, thesis, paper, university)."""
+        from jinja2 import Template
+        from home.letters import build_letter_context
+        # Unique names: the 0020 seed migration already owns the real dept/program
+        # names, and dept_name/program_name are unique.
+        dept = Department.objects.create(dept_name="Test EC Dept")
+        program = Program.objects.create(program_name="TBCT", department=dept)
+        teacher = TeacherInfo.objects.create(
+            name="Dr. Meena Rai", unique_id="T-R", email="meena@example.com",
+            department=dept, designation="Associate Professor", phone="+977-1-4444444",
+        )
+        student = StudentLoginInfo.objects.create(
+            username="Rita Gurung", roll_number="080BCT321", department=dept,
+            program=program, password="x", dob="2000-01-01", gender="Female",
+        )
+        application = Application.objects.create(
+            name="Rita Gurung", std=student, professor=teacher,
+            subjects="Data Structures,Operating Systems",
+            is_paper=True, applied_level="Masters", years_known="three years",
+            relationship_type="thesis supervisor",
+            strong_points="strong analytical ability and persistence.",
+            weak_points="occasional over-commitment to side projects.",
+            professional_experience="a six-month software internship.",
+        )
+        Academics.objects.create(
+            application=application, gpa="3.85", tentative_ranking="Top 5%",
+        )
+        Project.objects.create(
+            application=application, supervised_project="Autonomous Rover",
+            final_project="Traffic Classifier",
+        )
+        Paper.objects.create(
+            application=application, paper_title="On-Device ML",
+            paper_link="https://example.org/p",
+        )
+        University.objects.create(
+            application=application, uni_name="ETH Zurich", country="Switzerland",
+            program_applied="MSc Computer Science",
+        )
+        Qualities.objects.create(
+            application=application, extracirricular="the robotics club.",
+            recommend="strongly", recommendation_strength="top5",
+            leadership=True, teamwork=True,
+        )
+        context = build_letter_context(application)
+        must_appear = [
+            "Rita Gurung", "strong analytical ability", "over-commitment",
+            "six-month software internship", "Autonomous Rover", "On-Device ML",
+            "ETH Zurich", "robotics club", "Associate Professor",
+        ]
+        for tpl in CustomTemplates.objects.filter(
+            is_system=True,
+            template_name__in=[
+                "Comprehensive Reference (Pulchowk)",
+                "Graduate Admission (Detailed)",
+            ],
+        ):
+            letter = Template(tpl.template).render(context)
+            with self.subTest(name=tpl.template_name):
+                self.assertNotIn("None", letter)
+                self.assertNotIn("  ", letter)
+                for token in must_appear:
+                    self.assertIn(token, letter, f"{tpl.template_name} dropped {token!r}")
 
 
 class LetterContextTests(TestCase):
@@ -2714,8 +2784,9 @@ class NoHardcodedTemplatesTests(TestCase):
         self.assertFalse(hasattr(views, "add_default_template_to_all_professors"))
 
     def test_the_letter_bodies_come_from_the_database(self):
-        # The three system templates are the only shipped letter bodies now.
-        self.assertEqual(CustomTemplates.objects.filter(is_system=True).count(), 3)
+        # The shipped letter bodies are all system templates in the DB:
+        # three starters (0013) plus two detailed ones (0021).
+        self.assertEqual(CustomTemplates.objects.filter(is_system=True).count(), 5)
 
 
 class DashboardTemplateLinkTests(TestCase):

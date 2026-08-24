@@ -1,5 +1,5 @@
 /* ============================================================
-   Tribhuvan University (TU) theme tokens — derived from the TU
+   Tribhuvan University (TU) theme tokens - derived from the TU
    logo (static/images/tu.png): red #e01b22 + blue #6692cc on white.
    Red = primary (titles, buttons, CTAs); blue = interactive accents
    (focus, links). Defined once here (style.css loads on every page),
@@ -566,7 +566,7 @@ form .button input:hover {
 }
 
 /* ============================================================
-   Bootstrap element theming — map every Bootstrap button/badge
+   Bootstrap element theming - map every Bootstrap button/badge
    variant onto the TU palette so no page shows Bootstrap's default
    blue / green / yellow. This project ships Bootstrap 5.0.1, which
    predates the --bs-btn-* button variables (5.3+), so we override the

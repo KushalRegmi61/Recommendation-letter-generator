@@ -168,9 +168,9 @@
           <tr>
             <td>{{ item.name }}</td>
             <td>{{ item.email }}</td>
-            <td>{% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}—{% endif %}</td>
-            <td>{% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}—{% endif %}</td>
-            <td>{% if item.nearest_deadline %}{{ item.nearest_deadline|date:"d M Y" }}{% else %}—{% endif %}</td>
+            <td>{% if item.generated_at %}{{ item.generated_at|date:"d M Y, H:i" }}{% else %}-{% endif %}</td>
+            <td>{% if item.generated_template %}{{ item.generated_template.template_name }}{% else %}-{% endif %}</td>
+            <td>{% if item.nearest_deadline %}{{ item.nearest_deadline|date:"d M Y" }}{% else %}-{% endif %}</td>
             <td>
               <div class="action-row">
                 <form action='/studentfinal' method='POST' class="action-row">

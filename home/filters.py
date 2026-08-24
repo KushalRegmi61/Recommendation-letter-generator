@@ -1,6 +1,6 @@
 """Queryset filtering for the professor dashboard (FR-4 / FR-5).
 
-Pure ORM logic — no HTTP, no cookies. Callers pass an already-scoped
+Pure ORM logic - no HTTP, no cookies. Callers pass an already-scoped
 ``Application`` queryset (normally scoped to one professor) plus the raw
 GET parameters.
 """
@@ -11,7 +11,7 @@ from django.utils.dateparse import parse_date
 #: GET parameter names the dashboard understands.
 FILTER_PARAMS = ("department", "country", "college", "q", "deadline")
 
-#: Fields the free-text box searches. Student identity only — university
+#: Fields the free-text box searches. Student identity only - university
 #: name/country are covered by the dropdowns.
 SEARCH_FIELDS = (
     "name",

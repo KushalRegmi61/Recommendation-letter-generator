@@ -31,7 +31,7 @@
   .gen-form-card .gender-title { font-weight: 600; display: block; margin: 8px 0; }
 
   /* Note 3 (improvement.docx): declutter the review by hiding the fields and
-     whole cards the student left empty. They stay in the DOM — still editable —
+     whole cards the student left empty. They stay in the DOM - still editable -
      and the "Show empty fields" toggle reveals them, so the professor can fill
      anything in before generating the letter. */
   .gen .opt-empty { display: none; }
@@ -50,7 +50,7 @@
     {% if files.Photo %}<img src="{{ files.Photo.url }}" alt="{{ student.name }}">{% endif %}
     <div class="who">
       <h1>{{ student.name }}</h1>
-      <p>Submitted application — edit any field before generating the letter</p>
+      <p>Submitted application - edit any field before generating the letter</p>
     </div>
   </div>
 
@@ -62,7 +62,7 @@
       <dl class="kv">
         <dt>Full name</dt><dd><input type="text" name="name" value="{{ student.name|default:'' }}"></dd>
         <dt>Email</dt><dd><input type="text" name="email" value="{{ student.email|default:'' }}"></dd>
-        <dt>Contact</dt><dd>{{ student.contact_number|default:"—" }}</dd>
+        <dt>Contact</dt><dd>{{ student.contact_number|default:"-" }}</dd>
         <dt>Applied level</dt><dd><input type="text" name="applied_level" value="{{ student.applied_level|default:'' }}"></dd>
         <dt>LinkedIn</dt><dd><input type="text" name="linkedIn" value="{{ linkedin|default:'' }}"></dd>
       </dl>
@@ -107,7 +107,7 @@
           route();
         })();
       </script>
-      <p class="text-muted mb-0 mt-2" style="font-size:.78rem;">Enter a GPA or a final percentage — at least one is required.</p>
+      <p class="text-muted mb-0 mt-2" style="font-size:.78rem;">Enter a GPA or a final percentage - at least one is required.</p>
     </div>
 
     <div class="surface detail-card" data-keep-card>
@@ -342,7 +342,7 @@
 
 <script>
   // Note 3 (improvement.docx): collapse the fields/cards the student left empty
-  // so the review reads cleanly. Nothing is removed from the DOM — a toggle
+  // so the review reads cleanly. Nothing is removed from the DOM - a toggle
   // reveals the empty fields so the professor can still fill them in.
   (function () {
     var grid = document.querySelector('.detail-grid');
@@ -354,7 +354,7 @@
       var controls = wrap.querySelectorAll('input, textarea, select');
       if (!controls.length) {
         var t = (wrap.textContent || '').trim();
-        return t === '' || t === '—';   // em dash placeholder
+        return t === '' || t === '-';   // hyphen placeholder
       }
       var hasValue = false;
       for (var i = 0; i < controls.length; i++) {

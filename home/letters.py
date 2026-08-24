@@ -129,23 +129,32 @@ def sample_context():
     app = SimpleNamespace(
         name="Asmita Sharma", std=std,
         relationship_type="project supervisor", ranking_percentile="top 3%",
+        # Extra intake fields the richer templates draw on, so previews render
+        # every section instead of skipping the guarded ones.
+        applied_level="Masters", years_known="three years",
+        strong_points="a keen analytical mind, strong programming skills, and steady persistence.",
+        weak_points="a tendency to take on more than necessary, which she is actively managing.",
+        professional_experience="a six-month software internship at a local engineering firm.",
+        is_paper=True, class_size=72, prof_anecdote="",
     )
     academics = SimpleNamespace(gpa="3.82", final_percentage="", tentative_ranking="Top 5%")
     teacher = SimpleNamespace(
         name="Dr. Rajesh Koirala", email="rajesh@pcampus.edu.np",
-        title="Professor", phone="+977-1-5555555",
+        title="Professor", designation="Professor", phone="+977-1-5555555",
+        department=SimpleNamespace(dept_name="Electronics & Computer Engineering"),
     )
     quality = SimpleNamespace(
         quality="a meticulous and endlessly curious engineer",
         recommendation_strength="top5",
         leadership=True, hardworking=True, social=False, teamwork=True, friendly=True,
         presentation="excellent", recommend="strongly",
+        extracirricular="the robotics club and an inter-college hackathon, which her team won.",
     )
     paper = SimpleNamespace(paper_title="On-Device ML", paper_link="https://example.org/p")
-    project = SimpleNamespace(supervised_project="Autonomous rover",
-                              final_project="", deployed=True)
+    project = SimpleNamespace(supervised_project="an autonomous rover for terrain mapping",
+                              final_project="a real-time traffic classifier", deployed=True)
     university = SimpleNamespace(uni_name="ETH Zurich", country="Switzerland",
-                                 program_applied="MSc CS", uni_deadline=None)
+                                 program_applied="MSc Computer Science", uni_deadline=None)
     files = SimpleNamespace()
     parts = ["Data Structures", "Operating Systems", "Machine Learning"]
     return {
@@ -183,7 +192,7 @@ def validate_template(source):
     allowed = set(sample_context().keys())
     for name in sorted(meta.find_undeclared_variables(ast)):
         if name not in allowed:
-            warnings.append(f'Unknown field "{name}" — it will render empty.')
+            warnings.append(f'Unknown field "{name}" - it will render empty.')
     return errors, warnings
 
 

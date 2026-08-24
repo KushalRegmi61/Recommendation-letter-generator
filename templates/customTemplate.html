@@ -8,7 +8,7 @@
 {% block body %}
 <div class="center-content">
   <h3>Create Recommendation Letter Template</h3>
-  <p class="tpl-sub">Insert fields and optional sections from the menus — you never type a brace. Save checks the template; Preview shows a finished letter.</p>
+  <p class="tpl-sub">Insert fields and optional sections from the menus - you never type a brace. Save checks the template; Preview shows a finished letter.</p>
 
   {% if error %}
   <div class="tpl-banner tpl-banner-error">{{ error }}</div>
@@ -72,7 +72,7 @@
     <div class="tpl-toolbar">
       <label>Insert field:
         <select id="insertField">
-          <option value="">— choose —</option>
+          <option value="">- choose -</option>
           {% for grp in field_groups %}
           <optgroup label="{{ grp.group }}">
             {% for f in grp.fields %}<option value="{{ f.expr }}">{{ f.label }}</option>{% endfor %}
@@ -83,7 +83,7 @@
       <span class="tpl-optional">
         <label>Optional section if:
           <select id="optionalField">
-            <option value="">— choose —</option>
+            <option value="">- choose -</option>
             {% for grp in field_groups %}
             <optgroup label="{{ grp.group }}">
               {% for f in grp.fields %}<option value="{{ f.expr }}">{{ f.label }}</option>{% endfor %}
@@ -216,11 +216,17 @@
     display: block; align-self: flex-start; font-weight: 500; margin-bottom: 5px; text-align: left;
   }
   .tpl-toolbar, .tpl-preview-controls {
-    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center;
     text-align: left; margin: 10px 0; padding: 8px 10px;
     background: #f4f3ee; border: 1px solid #e4e3dc; border-radius: 8px;
   }
   .tpl-toolbar select, .tpl-preview-controls select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; }
+  /* Keep each label (text + its dropdown) together, and keep the optional
+     dropdown glued to its button so the button never splits onto its own row. */
+  .tpl-toolbar > label,
+  .tpl-optional > label { display: inline-flex; align-items: center; gap: 6px; }
+  .tpl-optional { display: inline-flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+  .tpl-optional #insertOptional { flex: 0 0 auto; white-space: nowrap; }
   .CodeMirror { height: 380px; border: 1px solid #ccc; border-radius: 6px; text-align: left; font-size: 14px; }
   .tpl-banner { text-align: left; padding: 10px 14px; border-radius: 6px; margin: 10px 0; }
   .tpl-banner-error { background: #fdecea; color: #b00020; }

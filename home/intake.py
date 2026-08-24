@@ -59,7 +59,7 @@ def academics_present(gpa, final_percentage):
 def normalize_bs_year(value):
     """Normalize a Bikram Sambat year to a canonical 4-digit string.
 
-    Students enter the same year many ways — ``2080``, ``080``, ``80`` — so
+    Students enter the same year many ways - ``2080``, ``080``, ``80`` - so
     the stored value drifts. Collapse them all to the 4-digit form (``2080``)
     so Enrollment Batch and Passed Year read consistently everywhere.
 

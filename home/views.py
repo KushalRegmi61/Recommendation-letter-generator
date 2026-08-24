@@ -518,7 +518,7 @@ def studentform1(request):
     submitted together and written in one ``transaction.atomic()`` block, so
     there is no cross-page state and no Back button to lose data to.
 
-    Identity is resolved from the signed session via ``current_student`` — any
+    Identity is resolved from the signed session via ``current_student`` - any
     ``naam``/``roll`` in the request body is ignored, closing the impersonation
     gap the two-page intake had (a logged-in student could submit under another
     student's name).
@@ -558,7 +558,7 @@ def studentform1(request):
     if not academics_present(gpa, final_percentage):
         return _render_student_form(
             request, student,
-            "Enter a GPA or a final percentage — at least one is required.",
+            "Enter a GPA or a final percentage - at least one is required.",
         )
 
     # --- BS years: store a consistent 4-digit form (080 / 80 → 2080) ---
@@ -1347,7 +1347,7 @@ def renderCustom(request):
         # persist the professor's inline edits before previewing. Reject before
         # saving anything so a bad edit leaves the record untouched.
         if not academics_present(request.POST.get("gpa"), request.POST.get("final_percentage")):
-            messages.error(request, "Enter a GPA or a final percentage — at least one is required.")
+            messages.error(request, "Enter a GPA or a final percentage - at least one is required.")
             return redirect("/teacher")
         apply_professor_edits(application, request.POST)
 
