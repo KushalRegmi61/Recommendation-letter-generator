@@ -1,194 +1,25 @@
 {% extends 'base2.html' %} {% block title %}Create Template{% endblock title %}
 {% block raw %}
-
-
-<!--
-
-A lot to do guys, Sir, requirements keep changing week after week. Now you have to give option to edit statically rendering block of the default 
- template. We had given option to create own template (90% completed issues to be resolved in formatting output) but later sir said to 
- give option to edit statically rendered block of letter i.e the blocks without if-else condition in test.html.
-
- Sir's plan is to give option to edit the default template in test.html and give option to create permanently or,
- give option to edit and save here, but give option to chagne only the blocks without if-else condition.
-
-We are out of time. So, Now its your turn guys.. Good news is this project is well maintained in comparision
-to most other projects though has some issues but it is easy to understand and solve. 
-
-Good Luck!
-
- -->
-
-<script
-  src="https://cdn.tiny.cloud/1/8mp7ivw6rz9h97mxfhfyg8ih7n14ym0dqhbgygiv7rjuhw12/tinymce/7/tinymce.min.js"
-  referrerpolicy="origin"
-></script>
-<script>
-  tinymce.init({
-    selector: "textarea#editor",
-    plugins: "code",
-    toolbar: "bold italic | ifelse | shortcode | code",
-    setup: function (editor) {
-
-   
-
-      const placeholderItems = [
-        { text: "Student Name", value: "{{ '{{' }} app.name }}" },
-        { text: "First Name", value: "{{ '{{' }} firstname }}" },
-        { text: "Program", value: "{{ '{{' }} app.std.program.program_name }}" },
-        { text: "Department", value: "{{ '{{' }} app.std.department.dept_name }}" },
-        { text: "Ranking Percentile", value: "{{ '{{' }} app.ranking_percentile }}" },
-        { text: "Relationship", value: "{{ '{{' }} rel_desc }}" },
-        { text: "Subjects Sentence", value: "{{ '{{' }} subjects_sentence }}" },
-        { text: "Subject", value: "{{ '{{' }} subject }}" },
-        { text: "GPA", value: "{{ '{{' }} academics.gpa }}" },
-        { text: "Standout Quality", value: "{{ '{{' }} quality.quality }}" },
-        { text: "Recommendation Strength", value: "{{ '{{' }} strength_phrase }}" },
-        { text: "Teacher Name", value: "{{ '{{' }} teacher.name }}" },
-        { text: "Teacher Email", value: "{{ '{{' }} teacher.email }}" },
-        { text: "Teacher Title", value: "{{ '{{' }} teacher.title }}" },
-        { text: "Teacher Phone", value: "{{ '{{' }} teacher.phone }}" },
-        { text: "Pronoun (he/she)", value: "{{ '{{' }} pronoun }}" },
-        { text: "Pronoun (him/her)", value: "{{ '{{' }} pronoun_obj }}" },
-        { text: "Pronoun (his/her)", value: "{{ '{{' }} pronoun_pos }}" },
-        { text: "Today's Date", value: "{{ '{{' }} today }}" },
-        { text: "Deadline", value: "{{ '{{' }} deadline }}" },
-      ];
-
-
-      // Add a custom button for if-else conditions
-      editor.ui.registry.addButton("ifelse", {
-        text: "If-Else",
-        onAction: function () {
-          editor.windowManager.open({
-            title: "Insert If-Else Condition",
-            body: {
-              type: "panel",
-              items: [
-                {
-                  type: "selectbox",
-                  name: "placeholder",
-                  label: "Choose Placeholder",
-                  items: placeholderItems,
-                },
-                {
-                  type: "input",
-                  name: "condition",
-                  label: "Condition",
-                  placeholder: 'e.g., student.is_pro == "Yes"',
-                },
-                {
-                  type: "button",
-                  text: "Insert Placeholder",
-                  name: "conditionPlaceholder",
-                },
-                {
-                  type: "textarea",
-                  name: "trueContent",
-                  label: "If True Content",
-                  placeholder: "Content if the condition is true",
-                },
-                {
-                  type: "button",
-                  text: "Insert Placeholder",
-                  name: "truePlaceholder",
-                },
-                {
-                  type: "textarea",
-                  name: "falseContent",
-                  label: "If False Content",
-                  placeholder: "Content if the condition is false",
-                },
-                {
-                  type: "button",
-                  text: "Insert Placeholder",
-                  name: "falsePlaceholder",
-                },
-              ],
-            },
-            buttons: [
-              {
-                type: "cancel",
-                text: "Close",
-              },
-              {
-                type: "submit",
-                text: "Insert",
-                primary: true,
-              },
-            ],
-            size: "medium",
-            onSubmit: function (api) {
-              const data = api.getData();
-              const djangoTemplate = `{{"{% if"}} "${data.condition}" %}${data.trueContent}{{'{%'}} else {{ '%}' }}${data.falseContent} {{'{%'}} endif {{ '%}' }}`;
-              editor.insertContent(djangoTemplate);
-              api.close();
-            },
-
-            //add placeholoder in the if-else condition field
-            onAction: (api, details) => {
-              if (details.name === "conditionPlaceholder") {
-                const data = api.getData();
-                data.condition += data.placeholder;
-                api.setData(data);
-              }
-              if (details.name === "truePlaceholder") {
-                const data = api.getData();
-                data.trueContent += data.placeholder;
-                api.setData(data);
-              }
-              if (details.name === "falsePlaceholder") {
-                const data = api.getData();
-                data.falseContent += data.placeholder;
-                api.setData(data);
-              }
-            },
-          });
-        },
-      });
-
-      // Add a custom button for placeholders
-      editor.ui.registry.addButton("shortcode", {
-        text: "Insert Placeholder",
-        onAction: function () {
-          editor.windowManager.open({
-            title: "Insert Placeholder",
-            body: {
-              type: "panel",
-              items: [
-                {
-                  type: "selectbox",
-                  name: "placeholder",
-                  label: "Placeholder",
-                  items: placeholderItems,
-                },
-              ],
-            },
-            buttons: [
-              {
-                type: "cancel",
-                text: "Close",
-              },
-              {
-                type: "submit",
-                text: "Insert",
-                primary: true,
-              },
-            ],
-            onSubmit: function (api) {
-              const data = api.getData();
-              editor.insertContent(data.placeholder);
-              api.close();
-            },
-          });
-        },
-      });
-    },
-  });
-
-</script>
-{% endblock raw %} {% block body %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/jinja2/jinja2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+{% endblock raw %}
+{% block body %}
 <div class="center-content">
   <h3>Create Recommendation Letter Template</h3>
+  <p class="tpl-sub">Insert fields and optional sections from the menus — you never type a brace. Save checks the template; Preview shows a finished letter.</p>
+
+  {% if error %}
+  <div class="tpl-banner tpl-banner-error">{{ error }}</div>
+  {% endif %}
+  {% if warnings %}
+  <div class="tpl-banner tpl-banner-warn">
+    <strong>Saved with warnings:</strong>
+    <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
   <div class="system-templates" style="margin: 20px 0;">
     <h3>Starter templates</h3>
     <p>Copy one into your own templates, then edit it however you like.</p>
@@ -196,17 +27,13 @@ Good Luck!
     <form method="post" action="/duplicateTemplate" style="display:inline-block; margin:4px;">
       {% csrf_token %}
       <input type="hidden" name="template_id" value="{{ sys_tpl.pk }}">
-      <button type="submit" class="btn btn-secondary">
-        Duplicate "{{ sys_tpl.template_name }}"
-      </button>
+      <button type="submit" class="btn btn-secondary">Duplicate "{{ sys_tpl.template_name }}"</button>
     </form>
     {% empty %}
     <p>No starter templates are installed.</p>
     {% endfor %}
   </div>
 
-  <!-- if there are existing templates, show them as an editable list (kept
-       OUTSIDE the getTemplate form so the setDefault/delete forms are not nested) -->
   {% if templates and templates.count > 0 %}
   <div class="my-templates" style="text-align:left; margin: 12px 0 20px;">
     <span class="details">Your templates:</span>
@@ -220,8 +47,7 @@ Good Luck!
           <input type="hidden" name="template_id" value="{{ tmp.pk }}">
           <button type="submit" class="btn btn-secondary">Set default</button>
         </form>
-        <form action="/deleteTemplate" method="post" style="display:inline"
-              onsubmit="return confirm('Delete this template?');">
+        <form action="/deleteTemplate" method="post" style="display:inline" onsubmit="return confirm('Delete this template?');">
           {% csrf_token %}
           <input type="hidden" name="template_id" value="{{ tmp.pk }}">
           <button type="submit" class="btn btn-secondary">Delete</button>
@@ -234,128 +60,180 @@ Good Luck!
 
   <form action="/getTemplate" method="post">
     {% csrf_token %}
-      <input type="hidden" name="template_id" id="templateId" value="{{ template.pk|default:'' }}">
+    <input type="hidden" name="template_id" id="templateId" value="{{ template.pk|default:'' }}">
     <div class="user-details">
       <div class="input-box">
-        <br />
-        <br />
         <span class="details">Template Name : </span>
-        <input
-          type="text"
-          placeholder="Template Name"
-          name="templateName"
-          id="templateName"
-          required
-        />
+        <input type="text" placeholder="Template Name" name="templateName" id="templateName" required />
       </div>
-
-      <br />
       <span class="details2">Template Content : </span>
     </div>
+
+    <div class="tpl-toolbar">
+      <label>Insert field:
+        <select id="insertField">
+          <option value="">— choose —</option>
+          {% for grp in field_groups %}
+          <optgroup label="{{ grp.group }}">
+            {% for f in grp.fields %}<option value="{{ f.expr }}">{{ f.label }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </label>
+      <span class="tpl-optional">
+        <label>Optional section if:
+          <select id="optionalField">
+            <option value="">— choose —</option>
+            {% for grp in field_groups %}
+            <optgroup label="{{ grp.group }}">
+              {% for f in grp.fields %}<option value="{{ f.expr }}">{{ f.label }}</option>{% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="button" id="insertOptional" class="btn btn-secondary">Insert optional section</button>
+      </span>
+    </div>
+
     <textarea id="editor" name="content"></textarea>
+
+    <div class="tpl-preview-controls">
+      <label>Preview with:
+        <select id="previewWith">
+          <option value="sample">Sample student</option>
+          {% for a in applications %}
+          <option value="{{ a.pk }}">{{ a.name|default:a.std.roll_number }} ({{ a.std.roll_number }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="button" id="previewBtn" class="btn btn-secondary">Preview letter</button>
+    </div>
 
     <div>
       <label><input type="checkbox" name="is_default" id="is_default" /> Make this my default template</label>
     </div>
-
-    <div class="button-container">
-      <div class="button">
-        <input type="submit" value="Save Template" />
-      </div>
-    </div>
+    <div class="button-container"><div class="button"><input type="submit" value="Save Template" /></div></div>
   </form>
+</div>
+
+<div id="previewModal" class="tpl-modal" style="display:none">
+  <div class="tpl-modal-inner">
+    <button type="button" id="previewClose" class="btn btn-secondary" style="float:right">Close</button>
+    <h4>Preview</h4>
+    <div id="previewBody"></div>
+  </div>
 </div>
 
 <div id="tpl-store" style="display:none">
   {% for tmp in templates %}
-  <input type="hidden" class="tpl-row"
-         data-id="{{ tmp.pk }}"
-         data-name="{{ tmp.template_name }}"
-         data-content="{{ tmp.template }}"
-         data-default="{{ tmp.is_default }}">
+  <input type="hidden" class="tpl-row" data-id="{{ tmp.pk }}" data-name="{{ tmp.template_name }}" data-content="{{ tmp.template }}" data-default="{{ tmp.is_default }}">
   {% endfor %}
 </div>
-<script>
-  function loadTemplateIntoEditor(pk) {
-    var row = document.querySelector('#tpl-store .tpl-row[data-id="' + pk + '"]');
-    if (!row) { return; }
-    document.getElementById('templateName').value = row.getAttribute('data-name');
-    document.getElementById('templateId').value = pk;
-    document.getElementById('is_default').checked =
-      row.getAttribute('data-default') === 'True';
-    var body = row.getAttribute('data-content');
-    var ed = tinymce.get('editor');
-    if (ed) { ed.setContent(body); }
-    document.getElementById('templateName').scrollIntoView({behavior: 'smooth'});
-  }
-</script>
 
-<style>
-  .center-content {
-    width: 90%;
-    margin: 0 auto;
-    text-align: center;
-  }
-  .button-container {
-    width: 200px;
-    margin: 0 auto;
-  }
-
-  form .input-box span.details {
-  display: block;
-  align-self: flex-start;
-  font-weight: 500;
-  margin-bottom: 5px;
-  text-align: left;
-}
-
-.details2 {
-  display: block;
-  align-self: flex-start;
-  font-weight: 500;
-  margin-bottom: 5px;
-  text-align: left;
-}
-</style>
-
-<!-- json_script emits a complete <script> element, so it can only be used as a
-     standalone sibling. Interpolating it inside another <script> (as this block
-     used to) closes the enclosing tag at the HTML-parser level and destroys the
-     rest of the handler. The values are read back below with JSON.parse. -->
 {% if template %}
 {{ template.template_name|json_script:"tmpname" }}
 {{ template.template|json_script:"tmpbody" }}
 {{ template.is_default|json_script:"tmpdefault" }}
 {% endif %}
+{% if submitted_content is not None %}
+{{ submitted_name|json_script:"subname" }}
+{{ submitted_content|json_script:"subbody" }}
+{% endif %}
 
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // load values when coming back from save or editing
-    var nameEl = document.getElementById('tmpname');
-    if (!nameEl) {
-      return;
-    }
-    document.getElementById('templateName').value = JSON.parse(nameEl.textContent);
-    document.getElementById('is_default').checked =
-      JSON.parse(document.getElementById('tmpdefault').textContent);
+(function () {
+  // Braces are assembled at runtime so Django's template engine never parses
+  // them out of this script.
+  var OPEN = '{' + '{', CLOSE = '}' + '}', TO = '{' + '%', TC = '%' + '}';
 
-    var body = JSON.parse(document.getElementById('tmpbody').textContent);
-    // DOMContentLoaded can beat TinyMCE's own init, in which case setContent on
-    // a not-yet-initialised editor is dropped. Cover both orderings rather than
-    // silently skipping the load, which is what the old guard did.
-    var editor = tinymce.get('editor');
-    if (editor) {
-      if (editor.initialized) {
-        editor.setContent(body);
-      } else {
-        editor.on('init', function () { editor.setContent(body); });
-      }
-    } else {
-      tinymce.on('AddEditor', function (e) {
-        e.editor.on('init', function () { e.editor.setContent(body); });
-      });
-    }
+  var cm = CodeMirror.fromTextArea(document.getElementById('editor'), {
+    mode: 'jinja2', lineNumbers: true, matchBrackets: true, lineWrapping: true
   });
+  window.__cm = cm;
+
+  function insert(text) { cm.replaceSelection(text); cm.focus(); }
+
+  document.getElementById('insertField').addEventListener('change', function () {
+    if (this.value) { insert(OPEN + ' ' + this.value + ' ' + CLOSE); this.selectedIndex = 0; }
+  });
+
+  document.getElementById('insertOptional').addEventListener('click', function () {
+    var expr = document.getElementById('optionalField').value;
+    if (!expr) { return; }
+    var body = cm.getSelection() || ' ...your text... ';
+    insert(TO + ' if ' + expr + ' ' + TC + body + TO + ' endif ' + TC);
+  });
+
+  var CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  document.getElementById('previewBtn').addEventListener('click', function () {
+    cm.save();
+    var pv = document.getElementById('previewWith').value;
+    var fd = new FormData();
+    fd.append('content', cm.getValue());
+    if (pv === 'sample') { fd.append('mode', 'sample'); }
+    else { fd.append('mode', 'application'); fd.append('application_id', pv); }
+    fd.append('csrfmiddlewaretoken', CSRF);
+    fetch('/previewTemplate', { method: 'POST', body: fd })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        document.getElementById('previewBody').innerHTML = html;
+        document.getElementById('previewModal').style.display = 'block';
+      });
+  });
+  document.getElementById('previewClose').addEventListener('click', function () {
+    document.getElementById('previewModal').style.display = 'none';
+  });
+
+  window.loadTemplateIntoEditor = function (pk) {
+    var row = document.querySelector('#tpl-store .tpl-row[data-id="' + pk + '"]');
+    if (!row) { return; }
+    document.getElementById('templateName').value = row.getAttribute('data-name');
+    document.getElementById('templateId').value = pk;
+    document.getElementById('is_default').checked = row.getAttribute('data-default') === 'True';
+    cm.setValue(row.getAttribute('data-content') || '');
+    document.getElementById('templateName').scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Refill after a save (edit) or a rejected save (validation error).
+  var subBody = document.getElementById('subbody');
+  var tmpBody = document.getElementById('tmpbody');
+  if (subBody) {
+    document.getElementById('templateName').value = JSON.parse(document.getElementById('subname').textContent);
+    cm.setValue(JSON.parse(subBody.textContent) || '');
+  } else if (tmpBody) {
+    document.getElementById('templateName').value = JSON.parse(document.getElementById('tmpname').textContent);
+    document.getElementById('is_default').checked = JSON.parse(document.getElementById('tmpdefault').textContent);
+    cm.setValue(JSON.parse(tmpBody.textContent) || '');
+  }
+})();
 </script>
 
+<style>
+  .center-content { width: 90%; margin: 0 auto; text-align: center; }
+  .tpl-sub { color: #545b66; font-size: 14px; margin: 0 0 14px; }
+  .button-container { width: 200px; margin: 16px auto 0; }
+  form .input-box span.details, .details2 {
+    display: block; align-self: flex-start; font-weight: 500; margin-bottom: 5px; text-align: left;
+  }
+  .tpl-toolbar, .tpl-preview-controls {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    text-align: left; margin: 10px 0; padding: 8px 10px;
+    background: #f4f3ee; border: 1px solid #e4e3dc; border-radius: 8px;
+  }
+  .tpl-toolbar select, .tpl-preview-controls select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 6px; }
+  .CodeMirror { height: 380px; border: 1px solid #ccc; border-radius: 6px; text-align: left; font-size: 14px; }
+  .tpl-banner { text-align: left; padding: 10px 14px; border-radius: 6px; margin: 10px 0; }
+  .tpl-banner-error { background: #fdecea; color: #b00020; }
+  .tpl-banner-warn { background: #fff8e1; color: #8a6d00; }
+  .tpl-banner ul { margin: 6px 0 0; }
+  .tpl-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000;
+    display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto;
+  }
+  .tpl-modal-inner {
+    background: #fff; max-width: 720px; width: 100%; border-radius: 10px;
+    padding: 22px 26px; text-align: left; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  }
+  .tpl-preview-error { color: #b00020; }
+</style>
 {% endblock body %}

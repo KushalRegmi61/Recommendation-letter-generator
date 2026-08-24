@@ -4717,3 +4717,31 @@ class TemplateSaveValidationTests(TestCase):
         self.assertIn("field_groups", resp.context)
         self.assertTrue(resp.context["field_groups"])
         self.assertIn("applications", resp.context)
+
+
+class TemplateEditorPageTests(TestCase):
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+        self.teacher = TeacherInfo.objects.create(
+            unique_id="TE1", name="Prof E", email="pe@example.com", department=self.dept,
+        )
+        login_as_teacher(self.client, self.teacher)
+
+    def test_page_uses_codemirror_not_tinymce(self):
+        resp = self.client.get("/makeTemplate")
+        self.assertContains(resp, "codemirror")
+        self.assertContains(resp, 'id="insertField"')
+        self.assertContains(resp, "Student name")
+        self.assertNotContains(resp, "tinymce")
+
+    def test_save_error_is_shown_in_a_banner(self):
+        resp = self.client.post("/getTemplate", {
+            "templateName": "Broken", "content": "{% if academics.gpa %}no end",
+        })
+        self.assertContains(resp, "syntax")
+
+    def test_unknown_variable_warning_is_shown(self):
+        resp = self.client.post("/getTemplate", {
+            "templateName": "Typo", "content": "Hi {{ nmae }}",
+        })
+        self.assertContains(resp, "nmae")
