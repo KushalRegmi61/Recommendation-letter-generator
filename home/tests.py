@@ -3701,12 +3701,42 @@ class TypedSubjectAtRegistrationTests(TestCase):
         response = self.client.get("/adminDashboard")
         self.assertContains(response, "data-subject-chips")
 
-    def test_no_subject_at_all_is_still_allowed(self):
-        # Subjects can be added later from the profile page.
+    def test_registering_with_no_subject_at_all_is_refused(self):
+        # A professor with no subjects cannot be picked on the student form:
+        # its "Courses Taught" list is built from exactly this data, so the
+        # student is left with an empty required field and no way through.
         response = self._register()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
+    def test_the_refusal_explains_why_a_subject_is_needed(self):
+        response = self._register()
+        self.assertContains(response, "Add at least one subject you teach")
+
+    def test_a_ticked_subject_alone_satisfies_the_requirement(self):
+        ticked = Subject.objects.create(sub_name="Operating Systems")
+        response = self._register(subjects=[ticked.pk])
         self.assertEqual(response.status_code, 302)
-        teacher = TeacherInfo.objects.get(email="typed@example.com")
-        self.assertEqual(teacher.subjects.count(), 0)
+        self.assertTrue(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
+    def test_a_typed_subject_alone_satisfies_the_requirement(self):
+        response = self._register(new_subjects=["Compiler Design"])
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
+    def test_whitespace_is_not_a_subject(self):
+        response = self._register(new_subjects=["   ", ","])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
+    def test_every_professor_a_student_can_pick_has_subjects(self):
+        # The invariant the student form depends on, stated directly.
+        self._register(new_subjects=["Compiler Design"])
+        for teacher in TeacherInfo.objects.all():
+            self.assertGreater(
+                teacher.subjects.count(), 0,
+                f"{teacher.name} has no subjects; the request form cannot offer any",
+            )
 
 
 class AddSubjectsTests(TestCase):
@@ -5200,4 +5230,3 @@ class FieldDefaultsFitTheirColumnsTests(TestCase):
         application.refresh_from_db()
         field = Application._meta.get_field("is_pro")
         self.assertLessEqual(len(application.is_pro), field.max_length)
-

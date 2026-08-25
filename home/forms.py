@@ -105,4 +105,18 @@ class TeacherInfoForm(forms.ModelForm):
 
         if password and confirm_password and password != confirm_password:
             raise ValidationError("Passwords do not match")
+
+        # Either input satisfies this, but one of them must. A professor with no
+        # subjects is not a harmless empty profile: the student request form
+        # builds its "Courses Taught" picker from this list, so picking such a
+        # professor leaves the student staring at an empty required field with
+        # nothing to tick and no way to continue.
+        if "new_subjects" not in self.errors:
+            if not cleaned_data.get("subjects") and not cleaned_data.get("new_subjects"):
+                self.add_error("new_subjects", ValidationError(
+                    "Add at least one subject you teach. Students pick from "
+                    "this list when they request a letter, so a professor with "
+                    "none cannot be chosen."
+                ))
+
         return cleaned_data

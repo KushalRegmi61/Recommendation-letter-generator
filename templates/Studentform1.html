@@ -453,10 +453,21 @@
                                    //add a blank option
                                   //  $("#teacher").append('<option id="hell"></option>');
 
-                                  $("#subject").append('<option >Select Subject</option>');//appending on the select
-
                                    //append new options returned
                                    $("#one span").remove();
+
+                                   if (result.length === 0) {
+                                       // A professor who has listed no subjects
+                                       // used to leave an empty box here, which
+                                       // reads as a broken control rather than
+                                       // as missing data on their profile.
+                                       $("#subject").append('<option>No subjects listed</option>');
+                                       $("#one").append('<span class="details">This professor has not listed the courses they teach yet. Ask them to add their subjects, or choose another professor.</span>');
+                                       return;
+                                   }
+
+                                  $("#subject").append('<option >Select Subject</option>');//appending on the select
+
                                    for (var i = result.length - 1; i >= 0; i--) {
 
                                      $("#one").append( '<span id="span" class="details" > <input type="checkbox" class="dropdown" name="subject'+[i]+'"  value="'+result[i].subject_name +'">' + result[i].subject_name+' </span>'  );//appending on the select
