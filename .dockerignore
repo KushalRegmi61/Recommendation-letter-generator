@@ -9,10 +9,15 @@ __pycache__/
 .gitignore
 db.sqlite3
 staticfiles/
-media/
 node_modules/
 docs/
 googleform-ss/
 *.docx
 CLAUDE.md
 .claude/
+
+# Uploaded media ships with the image so the demo data the database rows point
+# at is actually present in the container. Last match wins in .dockerignore, so
+# this stays after the patterns above and keeps media/ in no matter what they
+# would otherwise catch (media/docs/*.docx vs the *.docx rule, say).
+!media/**

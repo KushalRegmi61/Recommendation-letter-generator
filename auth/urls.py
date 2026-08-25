@@ -23,10 +23,11 @@ urlpatterns = [
     # Uploaded media (student photos, CVs, transcripts, generated letters).
     # Deliberately outside the DEBUG block below: static() returns nothing when
     # DEBUG is off, so with that alone every upload 404s in production, which is
-    # where the app actually runs. Files are written to MEDIA_ROOT, which the
-    # deployment mounts a persistent volume onto so they survive a redeploy.
-    # This handler is single-threaded and not built for high traffic; it is
-    # sized for this app, not for a CDN's job.
+    # where the app actually runs. MEDIA_ROOT is the image's own media/ dir,
+    # which the Dockerfile ships so the demo data is present; it is ephemeral,
+    # so anything uploaded at run time is lost on the next deploy. This handler
+    # is single-threaded and not built for high traffic; it is sized for this
+    # app, not for a CDN's job.
     re_path(r'^media/(?P<path>.*)$', serve_media, name='serve_media'),
 ]
 if settings.DEBUG:

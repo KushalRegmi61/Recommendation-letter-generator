@@ -5085,3 +5085,63 @@ class MediaServingTests(TestCase):
         # must not expose settings.py or anything else on the container.
         response = self.client.get("/media/../auth/settings.py")
         self.assertIn(response.status_code, (400, 404))
+
+
+class MediaRootDeployCheckTests(TestCase):
+    """The deploy must complain when MEDIA_ROOT is not usable.
+
+    Serving /media/ is already covered by ``MediaServingTests``; this is about
+    the directory itself being present and writable in whatever container the
+    app is running in, which is the part nothing used to notice.
+    """
+
+    def _run(self):
+        from home.checks import media_root_is_usable
+        return media_root_is_usable(None)
+
+    @override_settings(DEBUG=False)
+    def test_a_present_writable_media_root_is_silent(self):
+        with tempfile.TemporaryDirectory() as root:
+            with override_settings(MEDIA_ROOT=root):
+                self.assertEqual(self._run(), [])
+
+    @override_settings(DEBUG=False)
+    def test_a_missing_media_root_is_reported(self):
+        with tempfile.TemporaryDirectory() as root:
+            missing = os.path.join(root, "nope")
+            with override_settings(MEDIA_ROOT=missing):
+                ids = [w.id for w in self._run()]
+            self.assertEqual(ids, ["home.W002"])
+
+    @override_settings(DEBUG=False)
+    def test_an_unset_media_root_is_reported(self):
+        with override_settings(MEDIA_ROOT=""):
+            self.assertEqual([w.id for w in self._run()], ["home.W001"])
+
+    @override_settings(DEBUG=False)
+    def test_a_read_only_media_root_is_reported(self):
+        with tempfile.TemporaryDirectory() as root:
+            locked = os.path.join(root, "locked")
+            os.mkdir(locked, 0o500)
+            try:
+                with override_settings(MEDIA_ROOT=locked):
+                    ids = [w.id for w in self._run()]
+            finally:
+                os.chmod(locked, 0o700)
+        if os.geteuid() == 0:
+            # root ignores the mode bits, so there is nothing to detect.
+            self.assertEqual(ids, [])
+        else:
+            self.assertEqual(ids, ["home.W003"])
+
+    def test_development_is_left_alone(self):
+        # In dev MEDIA_ROOT is the working copy; warning about it is noise.
+        with override_settings(DEBUG=True, MEDIA_ROOT="/definitely/not/here"):
+            self.assertEqual(self._run(), [])
+
+    @override_settings(DEBUG=False)
+    def test_the_check_is_registered_with_django(self):
+        # It has to actually run during manage.py commands to be worth anything.
+        from django.core.checks import registry
+        names = [c.__name__ for c in registry.registry.get_checks()]
+        self.assertIn("media_root_is_usable", names)
