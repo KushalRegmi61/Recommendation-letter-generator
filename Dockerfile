@@ -30,4 +30,4 @@ EXPOSE 8000
 
 # Apply migrations, then serve. Config (DATABASE_URL, secrets) comes from the
 # environment / --env-file at run time.
-CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn auth.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn auth.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --timeout 120"]
