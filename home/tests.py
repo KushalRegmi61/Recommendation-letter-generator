@@ -4949,3 +4949,35 @@ class StudentRegistrationValidationTests(TestCase):
         resp = self.client.post("/registerStudent", {"csrfmiddlewaretoken": "x"})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(StudentLoginInfo.objects.exists())
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class MediaServingTests(TestCase):
+    """Uploads must be reachable at MEDIA_URL with DEBUG off.
+
+    django.conf.urls.static.static() expands to nothing unless DEBUG is on, so
+    for a long time nothing served /media/ in production: every student photo,
+    CV and transcript 404'd while the row pointing at it looked fine.
+    """
+
+    def setUp(self):
+        from django.core.files.storage import default_storage
+
+        self.name = default_storage.save("cv/probe.pdf", ContentFile(b"%PDF-1.4"))
+
+    @override_settings(DEBUG=False)
+    def test_uploads_are_served_with_debug_off(self):
+        response = self.client.get(f"/media/{self.name}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4")
+
+    @override_settings(DEBUG=False)
+    def test_missing_upload_is_404_not_a_500(self):
+        self.assertEqual(self.client.get("/media/cv/absent.pdf").status_code, 404)
+
+    @override_settings(DEBUG=False)
+    def test_path_traversal_cannot_escape_media_root(self):
+        # The handler resolves paths against MEDIA_ROOT; climbing out of it
+        # must not expose settings.py or anything else on the container.
+        response = self.client.get("/media/../auth/settings.py")
+        self.assertIn(response.status_code, (400, 404))
