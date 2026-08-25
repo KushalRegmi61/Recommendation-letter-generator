@@ -1732,6 +1732,7 @@ def adminDashboard(request):
 
             # Save many-to-many relationships
             form.save_m2m()
+            form.save_new_subjects(teacher_info)
             
             messages.success(request, 'Teacher added successfully!')
             send_mail_safely('Account Created Successfully', f'Dear sir,\n  Your account has been created in Recommendation Letter Generator. Your username is {uname}. Please login to verify. If you get any problem please contact us.  \n Link: http://recommendation-generator.bct.itclub.pp.ua/  \n \nBest Regards, \nIoe Recommendation Letter Generator', 'ioerecoletter@gmail.com', [teacher_info.email], fail_message="Teacher account-creation mail failed")
@@ -1895,6 +1896,7 @@ def registerProfessor(request):
             teacher_info.unique_id = unique_id
             teacher_info.save()
             form.save_m2m()
+            form.save_new_subjects(teacher_info)
             # Create corresponding User
             uname = teacher_info.name.lower().replace('dr. ', '').replace(' ', '') + "_" + unique_id
             user = User.objects.create_user(

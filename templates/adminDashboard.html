@@ -72,17 +72,23 @@
                     </select>
                 </div>
 
-                <div style="margin-top:25px;position:relative;width:100%;" class="form-made" data-validate="Subjects are required">
-                    <span class="details">Subjects:</span>
-                    {{ form.subjects }}
-                </div>
-                
-                
                 <div class="wrap-input100 validate-input m-b-26" data-validate="Image is required">
                     <span class="label-input100">Profile Image :</span>
                     <input class="input100" type="file" name="images" required/>
                     <span class="focus-input100"></span>
                 </div>
+
+                <div style="margin-top:25px;position:relative;width:100%;" class="form-made">
+                    <span class="details">Subjects:</span>
+                    {{ form.subjects }}
+                </div>
+
+                <div style="margin-top:25px;position:relative;width:100%;" class="form-made">
+                    <span class="details">Add your own subject:</span>
+                    {{ form.new_subjects }}
+                    <span class="details" style="font-size:12px;color:#999;">Not in the list? Type it here. Separate several with commas.</span>
+                </div>
+
                 
                 <div class="container-login100-form-btn">
                     <button class="login100-form-btn">Add Teacher</button>

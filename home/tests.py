@@ -3605,6 +3605,72 @@ class ProfessorRegistrationTests(TestCase):
         self.assertTrue(created.is_active)
 
 
+class TypedSubjectAtRegistrationTests(TestCase):
+    """A professor can type a subject that is not in the shared pool yet."""
+
+    def setUp(self):
+        self.dept = Department.objects.create(dept_name="BCT")
+
+    def _register(self, **extra):
+        data = {
+            "name": "Typed Prof", "email": "typed@example.com",
+            "department": self.dept.pk,
+            "password": "signup-pw", "confirm_password": "signup-pw",
+        }
+        data.update(extra)
+        return self.client.post("/registerProfessor/", data)
+
+    def test_a_typed_subject_is_created_and_attached(self):
+        self._register(new_subjects="Compiler Design")
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(
+            [s.sub_name for s in teacher.subjects.all()], ["Compiler Design"],
+        )
+
+    def test_registration_no_longer_needs_an_existing_subject(self):
+        # The pool is empty, so the checkbox list has nothing to tick. That must
+        # not be what blocks a professor from registering.
+        response = self._register(new_subjects="Compiler Design")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
+    def test_several_subjects_can_be_typed_at_once(self):
+        self._register(new_subjects="Compiler Design, Operating Systems")
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(
+            sorted(s.sub_name for s in teacher.subjects.all()),
+            ["Compiler Design", "Operating Systems"],
+        )
+
+    def test_an_existing_subject_is_reused_case_insensitively(self):
+        existing = Subject.objects.create(sub_name="Operating Systems")
+        self._register(new_subjects="operating systems")
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(list(teacher.subjects.all()), [existing])
+        self.assertEqual(Subject.objects.filter(sub_name__iexact="operating systems").count(), 1)
+
+    def test_a_typed_subject_combines_with_a_ticked_one(self):
+        ticked = Subject.objects.create(sub_name="Operating Systems")
+        self._register(subjects=[ticked.pk], new_subjects="Compiler Design")
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(
+            sorted(s.sub_name for s in teacher.subjects.all()),
+            ["Compiler Design", "Operating Systems"],
+        )
+
+    def test_blank_and_duplicate_entries_are_ignored(self):
+        self._register(new_subjects="Compiler Design, , compiler design,")
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(teacher.subjects.count(), 1)
+
+    def test_no_subject_at_all_is_still_allowed(self):
+        # Subjects can be added later from the profile page.
+        response = self._register()
+        self.assertEqual(response.status_code, 302)
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(teacher.subjects.count(), 0)
+
+
 class AddSubjectsTests(TestCase):
     """A professor can add a subject to their profile."""
 
