@@ -5145,3 +5145,59 @@ class MediaRootDeployCheckTests(TestCase):
         from django.core.checks import registry
         names = [c.__name__ for c in registry.registry.get_checks()]
         self.assertIn("media_root_is_usable", names)
+
+
+class FieldDefaultsFitTheirColumnsTests(TestCase):
+    """A field's default must fit the column it is stored in.
+
+    ``Application.is_pro`` was ``max_length=3`` with ``default="null"`` -- four
+    characters. SQLite does not enforce varchar limits, so every test and every
+    local run passed while Postgres rejected the insert outright, taking down
+    the entire student request form with "value too long for type character
+    varying(3)". Only the production database ever disagreed, so the guard has
+    to be on the declaration rather than on a saved row.
+    """
+
+    def test_no_field_default_overflows_its_max_length(self):
+        from django.apps import apps
+        from django.db.models import NOT_PROVIDED
+
+        overflowing = []
+        for model in apps.get_app_config("home").get_models():
+            for field in model._meta.get_fields():
+                max_length = getattr(field, "max_length", None)
+                default = getattr(field, "default", NOT_PROVIDED)
+                if not max_length or default is NOT_PROVIDED or default is None:
+                    continue
+                if callable(default):
+                    continue
+                if len(str(default)) > max_length:
+                    overflowing.append(
+                        f"{model.__name__}.{field.name}: default {default!r} is "
+                        f"{len(str(default))} chars but max_length={max_length}"
+                    )
+
+        self.assertEqual(overflowing, [], "\n".join(overflowing))
+
+    def test_an_application_saves_with_its_field_defaults(self):
+        # The exact path that broke: get_or_create writes every default.
+        dept = Department.objects.create(dept_name="BCT")
+        program = Program.objects.create(program_name="BE-BCT", department=dept)
+        student = StudentLoginInfo.objects.create(
+            username="Defaults Student", roll_number="080BCT700", department=dept,
+            program=program, password=make_password("pw"), dob="2000-01-01",
+        )
+        teacher = TeacherInfo.objects.create(
+            name="Prof Defaults", unique_id="T-DEF", email="def@example.com",
+            department=dept,
+        )
+
+        application, created = Application.objects.get_or_create(
+            std=student, professor=teacher,
+        )
+        self.assertTrue(created)
+
+        application.refresh_from_db()
+        field = Application._meta.get_field("is_pro")
+        self.assertLessEqual(len(application.is_pro), field.max_length)
+

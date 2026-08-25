@@ -80,7 +80,10 @@ class Application(models.Model):
     std = models.ForeignKey(StudentLoginInfo, on_delete= CASCADE)
     is_generated = models.BooleanField(default=False) 
     years_taught= models.CharField(max_length=10, null=True, blank=True)
-    is_pro = models.CharField(max_length=3,default="null")
+    # max_length was 3 while the default is the 4-character string "null", so
+    # every insert overflowed the column. SQLite ignores varchar limits, so this
+    # only ever surfaced on Postgres, where it made the whole request form 500.
+    is_pro = models.CharField(max_length=10, default="null")
     subjects= models.CharField(max_length=500, null=True, blank=True)
     is_paper = models.CharField(max_length=500, null=True, blank=True)
     intern = models.BooleanField(default=False)
