@@ -14,6 +14,46 @@ class StudentForm(forms.ModelForm):
         fields = ['username', 'roll_number', 'dob', 'department', 'program', 'gender', 'password', 'photo']
         exclude = ('department','program',)
 
+class SubjectChipsWidget(forms.TextInput):
+    """Posts one value per chip, so the field reads back a list of names."""
+
+    def value_from_datadict(self, data, files, name):
+        if hasattr(data, "getlist"):
+            return data.getlist(name)
+        return data.get(name)
+
+
+class SubjectChipsField(forms.Field):
+    """Subject names typed in one at a time and posted as removable chips.
+
+    A plain string is still accepted and still splits on commas, so the field
+    works unchanged when JavaScript never runs.
+    """
+
+    widget = SubjectChipsWidget
+
+    def to_python(self, value):
+        if value in self.empty_values:
+            return []
+        if isinstance(value, str):
+            value = [value]
+
+        max_length = Subject._meta.get_field("sub_name").max_length
+        names, seen = [], set()
+        for entry in value:
+            for part in str(entry).split(","):
+                name = part.strip()
+                if not name or name.casefold() in seen:
+                    continue
+                if len(name) > max_length:
+                    raise ValidationError(
+                        "Keep each subject under %d characters." % max_length
+                    )
+                seen.add(name.casefold())
+                names.append(name)
+        return names
+
+
 ## 78 batch
 class TeacherInfoForm(forms.ModelForm):
 
@@ -22,11 +62,9 @@ class TeacherInfoForm(forms.ModelForm):
     # The shared Subject pool starts out empty, so the checkbox list alone gave a
     # professor nothing to tick and no way to register. This lets them type the
     # subject they teach even when no such row exists yet.
-    new_subjects = forms.CharField(
+    new_subjects = SubjectChipsField(
         required=False,
         label="Add your own subject",
-        help_text="Not in the list? Type it here. Separate several with commas.",
-        widget=forms.TextInput(attrs={"placeholder": "e.g. Compiler Design"}),
     )
 
     class Meta:
@@ -47,23 +85,6 @@ class TeacherInfoForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         # Ticking a box is now optional: typing a subject is an equal way in.
         self.fields['subjects'].required = False
-
-    def clean_new_subjects(self):
-        """Split the free text into a de-duplicated list of subject names."""
-        raw = self.cleaned_data.get("new_subjects") or ""
-        max_length = Subject._meta.get_field("sub_name").max_length
-        names, seen = [], set()
-        for part in raw.split(","):
-            name = part.strip()
-            if not name or name.casefold() in seen:
-                continue
-            if len(name) > max_length:
-                raise ValidationError(
-                    "Keep each subject under %d characters." % max_length
-                )
-            seen.add(name.casefold())
-            names.append(name)
-        return names
 
     def save_new_subjects(self, teacher_info):
         """Attach the typed-in subjects. Call after ``save_m2m()``.

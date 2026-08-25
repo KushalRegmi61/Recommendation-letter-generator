@@ -103,9 +103,11 @@
             {% if field.field.queryset.exists %}
             {{ field }}
             {% else %}
-            <span class="empty">No subjects available yet &mdash; type your own below.</span>
+            <span class="empty">No subjects available yet &mdash; add your own below.</span>
             {% endif %}
           </div>
+          {% elif field.name == 'new_subjects' %}
+          {% include '_subject_chips.html' %}
           {% else %}
           {{ field }}
           {% endif %}

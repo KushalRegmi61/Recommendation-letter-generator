@@ -3658,10 +3658,48 @@ class TypedSubjectAtRegistrationTests(TestCase):
             ["Compiler Design", "Operating Systems"],
         )
 
+    def test_each_chip_posts_its_own_value(self):
+        # The type-and-add picker posts one ``new_subjects`` input per chip.
+        self._register(new_subjects=["Compiler Design", "Operating Systems"])
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(
+            sorted(s.sub_name for s in teacher.subjects.all()),
+            ["Compiler Design", "Operating Systems"],
+        )
+
+    def test_duplicate_chips_collapse_to_one_subject(self):
+        self._register(new_subjects=["Compiler Design", "compiler design"])
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertEqual(teacher.subjects.count(), 1)
+
+    def test_a_removed_chip_is_not_saved(self):
+        # Removing a chip removes its hidden input, so it never reaches us.
+        self._register(new_subjects=["Compiler Design"])
+        teacher = TeacherInfo.objects.get(email="typed@example.com")
+        self.assertFalse(teacher.subjects.filter(sub_name="Operating Systems").exists())
+
+    def test_a_too_long_subject_is_rejected(self):
+        response = self._register(new_subjects=["x" * 200])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TeacherInfo.objects.filter(email="typed@example.com").exists())
+
     def test_blank_and_duplicate_entries_are_ignored(self):
         self._register(new_subjects="Compiler Design, , compiler design,")
         teacher = TeacherInfo.objects.get(email="typed@example.com")
         self.assertEqual(teacher.subjects.count(), 1)
+
+    def test_the_register_page_offers_the_type_and_add_picker(self):
+        response = self.client.get("/registerProfessor/")
+        self.assertContains(response, "data-subject-chips")
+        self.assertContains(response, "data-sc-add")
+
+    def test_the_admin_page_offers_the_type_and_add_picker(self):
+        admin = User.objects.create_superuser(
+            username="chiproot", password="pw", email="chiproot@example.com",
+        )
+        self.client.force_login(admin)
+        response = self.client.get("/adminDashboard")
+        self.assertContains(response, "data-subject-chips")
 
     def test_no_subject_at_all_is_still_allowed(self):
         # Subjects can be added later from the profile page.

@@ -1,0 +1,170 @@
+{% comment %}
+Type-and-add subject picker.
+
+The shared Subject pool can be empty, so a professor must be able to name the
+subjects they teach. Each added subject becomes a chip backed by its own hidden
+``new_subjects`` input, which is what ``SubjectChipsField`` reads back off the
+POST. Without JavaScript the plain text box still posts, and commas still split,
+so the field degrades to the old behaviour rather than breaking.
+
+Expects ``field`` in context: the bound ``new_subjects`` field.
+{% endcomment %}
+<style>
+  .subject-chips { width: 100%; }
+  .subject-chips .sc-entry { display: flex; gap: 8px; align-items: stretch; }
+  .subject-chips .sc-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 44px;
+    padding: 0 14px;
+    border: 1px solid #d9d9d9 !important;
+    border-radius: 6px;
+    background: #fff;
+    color: #333;
+    font-family: Poppins-Regular, sans-serif;
+    font-size: 15px;
+  }
+  .subject-chips .sc-text:focus {
+    border-color: #e01b22 !important;
+    box-shadow: 0 0 0 3px rgba(224, 27, 34, .12);
+    outline: none;
+  }
+  .subject-chips .sc-add {
+    flex: 0 0 auto;
+    padding: 0 22px;
+    height: 44px;
+    border: 0;
+    border-radius: 6px;
+    background: #e01b22;
+    color: #fff;
+    font-family: Poppins-Regular, sans-serif;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .subject-chips .sc-add:hover { background: #c4161c; }
+  .subject-chips .sc-list {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 0;
+    padding: 0;
+  }
+  .subject-chips .sc-list:empty { margin: 0; }
+  .subject-chips .sc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 6px 12px;
+    border: 1px solid #f0c3c5;
+    border-radius: 999px;
+    background: #fdeff0;
+    color: #333;
+    font-family: Poppins-Regular, sans-serif;
+    font-size: 14px;
+  }
+  .subject-chips .sc-remove {
+    border: 0;
+    background: transparent;
+    color: #e01b22;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+    cursor: pointer;
+  }
+  .subject-chips .sc-remove:hover { color: #8f1015; }
+  .subject-chips .sc-hint { display: block; font-size: 12px; color: #999; margin-top: 6px; }
+</style>
+
+<div class="subject-chips" data-subject-chips>
+  <div class="sc-entry">
+    <input type="text" class="sc-text" name="{{ field.html_name }}"
+           id="{{ field.id_for_label }}" placeholder="e.g. Compiler Design"
+           autocomplete="off" data-sc-text>
+    <button type="button" class="sc-add" data-sc-add>Add</button>
+  </div>
+  <ul class="sc-list" data-sc-list>
+    {% for name in field.value %}
+    <li class="sc-chip" data-sc-chip>
+      <span data-sc-label>{{ name }}</span>
+      <button type="button" class="sc-remove" data-sc-remove
+              aria-label="Remove {{ name }}">&times;</button>
+      <input type="hidden" name="{{ field.html_name }}" value="{{ name }}">
+    </li>
+    {% endfor %}
+  </ul>
+  <span class="sc-hint">Type a subject and press Add. Repeat for as many as you teach.</span>
+</div>
+
+<script>
+  (function () {
+    document.querySelectorAll("[data-subject-chips]").forEach(function (root) {
+      var text = root.querySelector("[data-sc-text]");
+      var list = root.querySelector("[data-sc-list]");
+      var fieldName = text.getAttribute("name");
+
+      // The visible box must not post alongside the chips, or an un-added
+      // leftover would be submitted twice. It only carries a name until the
+      // script runs, so a no-JS browser still posts what was typed.
+      text.removeAttribute("name");
+
+      function existing() {
+        return Array.prototype.map.call(
+          list.querySelectorAll("[data-sc-label]"),
+          function (el) { return el.textContent.trim().toLowerCase(); }
+        );
+      }
+
+      function addChip(name) {
+        if (!name || existing().indexOf(name.toLowerCase()) !== -1) { return; }
+
+        var chip = document.createElement("li");
+        chip.className = "sc-chip";
+        chip.setAttribute("data-sc-chip", "");
+
+        var label = document.createElement("span");
+        label.setAttribute("data-sc-label", "");
+        label.textContent = name;
+
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "sc-remove";
+        remove.setAttribute("data-sc-remove", "");
+        remove.setAttribute("aria-label", "Remove " + name);
+        remove.innerHTML = "&times;";
+
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = fieldName;
+        hidden.value = name;
+
+        chip.appendChild(label);
+        chip.appendChild(remove);
+        chip.appendChild(hidden);
+        list.appendChild(chip);
+      }
+
+      function commit() {
+        // A pasted "A, B" becomes two chips, matching what the server does.
+        text.value.split(",").forEach(function (part) { addChip(part.trim()); });
+        text.value = "";
+        text.focus();
+      }
+
+      root.querySelector("[data-sc-add]").addEventListener("click", commit);
+
+      text.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === ",") {
+          // Enter in a lone text box otherwise submits the whole form.
+          event.preventDefault();
+          commit();
+        }
+      });
+
+      list.addEventListener("click", function (event) {
+        var remove = event.target.closest("[data-sc-remove]");
+        if (remove) { remove.closest("[data-sc-chip]").remove(); }
+      });
+    });
+  })();
+</script>
