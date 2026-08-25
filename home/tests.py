@@ -5230,3 +5230,83 @@ class FieldDefaultsFitTheirColumnsTests(TestCase):
         application.refresh_from_db()
         field = Application._meta.get_field("is_pro")
         self.assertLessEqual(len(application.is_pro), field.max_length)
+
+
+class MailNeverBlocksTheRequestTests(TestCase):
+    """Sending mail must not be able to hang or 500 a request.
+
+    A raw send_mail in studentform1 took the deployment down: outbound SMTP got
+    no answer, smtplib had no timeout so the socket blocked indefinitely, and
+    gunicorn killed the worker at its 120s limit. Every student submission then
+    looked like an outage, even though the application row had already been
+    written. fail_silently does not help with a hang -- only a timeout does.
+
+    These assert against ``auth.settings`` rather than ``django.conf.settings``
+    on purpose: the test runner replaces EMAIL_BACKEND with locmem so that tests
+    never send anything, which would make the runtime value say nothing about
+    what the deployment is actually configured to do.
+    """
+
+    def _project_settings(self):
+        import auth.settings as project_settings
+        return project_settings
+
+    def test_outgoing_mail_is_off_by_default(self):
+        # Nothing in the app depends on mail arriving, and attempting to send it
+        # is what hung the deployment. It stays off until deliberately enabled
+        # with DJANGO_EMAIL_ENABLED.
+        self.assertFalse(self._project_settings().EMAIL_ENABLED)
+
+    def test_no_smtp_backend_is_configured_while_mail_is_off(self):
+        project_settings = self._project_settings()
+        if not project_settings.EMAIL_ENABLED:
+            self.assertNotIn("smtp", project_settings.EMAIL_BACKEND.lower())
+
+    def test_sending_opens_no_socket(self):
+        # The failure being guarded is a hang inside socket.create_connection,
+        # so the assertion is that no socket is opened at all -- not merely that
+        # the send returns. Callers still need no special-casing: sending is a
+        # no-op that neither raises nor touches the network.
+        from django.core.mail import EmailMessage, get_connection
+
+        with mock.patch(
+            "socket.create_connection",
+            side_effect=AssertionError("mail must not open a socket while off"),
+        ):
+            connection = get_connection(
+                backend=self._project_settings().EMAIL_BACKEND,
+            )
+            connection.send_messages([
+                EmailMessage("Subject", "Body", "from@e.com", ["to@e.com"]),
+            ])
+
+    def test_a_send_timeout_is_configured_for_when_it_is_re_enabled(self):
+        project_settings = self._project_settings()
+        self.assertIsNotNone(
+            project_settings.EMAIL_TIMEOUT,
+            "EMAIL_TIMEOUT is None, so smtplib will block until gunicorn kills "
+            "the worker",
+        )
+        self.assertLessEqual(project_settings.EMAIL_TIMEOUT, 30)
+
+    def test_no_view_calls_send_mail_directly(self):
+        # Everything must go through send_mail_safely / mail_admins_safely,
+        # which log rather than either raising or failing silently.
+        import re
+        from pathlib import Path
+
+        offenders = []
+        for path in sorted(Path("home").glob("*.py")):
+            if path.name == "tests.py":
+                continue  # tests legitimately drive the mail API directly
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if path.name == "views.py" and 130 <= number <= 175:
+                    continue  # the bodies of the helpers themselves
+                if re.search(r"\bsend_mail\(|\bmail_admins\(", line):
+                    if "_safely" in line:
+                        continue
+                    offenders.append(f"{path}:{number}: {line.strip()}")
+
+        self.assertEqual(offenders, [], "\n".join(offenders))

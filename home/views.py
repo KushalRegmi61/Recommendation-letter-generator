@@ -679,7 +679,10 @@ def studentform1(request):
     nearest_deadline = min(
         (r["uni_deadline"] for r in uni_rows if r["uni_deadline"]), default=None
     )
-    send_mail(
+    # The application is already written at this point, so a mail failure must
+    # not take the response down with it. fail_silently swallows the error but
+    # says nothing; the helper logs it, so a broken mail setup is discoverable.
+    send_mail_safely(
         "Application for recommendation letter",
         f"Dear sir,\n {student.username} has sent an application in Recommendation "
         f"Letter Generator. Nearest Deadline is {nearest_deadline}. Please log in to "
@@ -687,7 +690,7 @@ def studentform1(request):
         f"\n\nBest Regards,\nIoe Recommendation Letter Generator",
         "ioerecoletter@gmail.com",
         [prof.email],
-        fail_silently=True,
+        fail_message="New-application notification to the professor failed",
     )
 
     return render(request, "student_success.html", {
@@ -851,12 +854,12 @@ def otp(request):
     master = None
     if user is not None:
         master = TeacherInfo.objects.filter(user=user).first()
-        send_mail(
+        send_mail_safely(
             "OTP ",
             "Your OTP for Recoomendation Letter is " + otp_value,
             "recoioe@gmail.com",
             [user.email],
-            fail_silently=True,
+            fail_message="Password-reset OTP mail failed",
         )
 
     # Same page either way; ``master`` may be None for an unknown username.

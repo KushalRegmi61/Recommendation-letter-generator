@@ -250,7 +250,27 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", "")
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# Outgoing mail is OFF. Sending it hung the deployment: outbound SMTP got no
+# answer, smtplib had no timeout so the socket blocked, and gunicorn killed the
+# worker at 120s -- so every student submission looked like an outage even
+# though the application row had already been written. Nothing in this app
+# depends on mail arriving; the notifications are a courtesy and the OTP flows
+# still work through the session. The dummy backend accepts and discards each
+# message instantly, so callers need no special-casing.
+#
+# To turn it back on: set DJANGO_EMAIL_ENABLED=true along with EMAIL_HOST_USER
+# and EMAIL_HOST_PASSWORD.
+EMAIL_ENABLED = env_bool("DJANGO_EMAIL_ENABLED", False)
+
+# Belt and braces for whenever it is switched back on: without this, smtplib
+# inherits the global socket timeout of None and a silently-dropped port 587 --
+# common on container platforms -- hangs the worker all over again.
+EMAIL_TIMEOUT = int(env("EMAIL_TIMEOUT", "10"))
+
+if EMAIL_ENABLED:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.dummy.EmailBackend'
 
 # Nothing in this app frames itself -- there is no <iframe>, <embed> or <object>
 # in any template -- so the stricter value costs nothing and closes clickjacking
