@@ -1,0 +1,197 @@
+<title>Guided Source Editor — Mockup</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --sheet: #ffffff; --code-bg: #fcfcfa; --ink: #1c2027;
+    --ink-soft: #545b66; --ink-faint: #878e99; --line: #e4e3dc; --line-strong: #d3d2c8;
+    --rail: #f4f3ee; --var: #33429e; --var-bg: #edf0fc; --tag: #0a6b6b; --tag-bg: #e6f6f5;
+    --filt: #9a6b16; --text-tok: #3b424c; --good: #2f9e44; --good-bg: #e8f6ec; --accent: #33429e;
+    --gutter: #b7bcc4;
+    --shadow: 0 1px 2px rgba(28,32,39,.06), 0 8px 24px rgba(28,32,39,.06);
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #14161b; --sheet: #1b1e24; --code-bg: #16181e; --ink: #e7e9ee;
+      --ink-soft: #a4abb6; --ink-faint: #6f7681; --line: #2b2f37; --line-strong: #363b45;
+      --rail: #191c22; --var: #9aa6f5; --var-bg: #20264180; --tag: #7fd4d4; --tag-bg: #14262a80;
+      --filt: #d9b166; --text-tok: #c2c8d2; --good: #51cf66; --good-bg: #16281b; --accent: #9aa6f5;
+      --gutter: #4a505b;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); }
+  }
+  :root[data-theme="dark"] { --paper: #14161b; --sheet: #1b1e24; --code-bg: #16181e; --ink: #e7e9ee;
+      --ink-soft: #a4abb6; --ink-faint: #6f7681; --line: #2b2f37; --line-strong: #363b45;
+      --rail: #191c22; --var: #9aa6f5; --var-bg: #20264180; --tag: #7fd4d4; --tag-bg: #14262a80;
+      --filt: #d9b166; --text-tok: #c2c8d2; --good: #51cf66; --good-bg: #16281b; --accent: #9aa6f5;
+      --gutter: #4a505b; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); }
+  :root[data-theme="light"] { --paper: #fbfbf8; --sheet: #ffffff; --code-bg: #fcfcfa; --ink: #1c2027;
+      --ink-soft: #545b66; --ink-faint: #878e99; --line: #e4e3dc; --line-strong: #d3d2c8;
+      --rail: #f4f3ee; --var: #33429e; --var-bg: #edf0fc; --tag: #0a6b6b; --tag-bg: #e6f6f5;
+      --filt: #9a6b16; --text-tok: #3b424c; --good: #2f9e44; --good-bg: #e8f6ec; --accent: #33429e;
+      --gutter: #b7bcc4; --shadow: 0 1px 2px rgba(28,32,39,.06), 0 8px 24px rgba(28,32,39,.06); }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; }
+  .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } .rail { display: none; } }
+
+  .rail { background: var(--rail); border-right: 1px solid var(--line); padding: 20px 14px; }
+  .rail h2 { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 6px 12px; font-weight: 600; }
+  .tpl { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px;
+    cursor: pointer; font-size: 13.5px; color: var(--ink-soft); }
+  .tpl:hover { background: rgba(128,128,128,.08); }
+  .tpl.active { background: var(--sheet); color: var(--ink); box-shadow: var(--shadow); font-weight: 550; }
+  .tpl .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge-default { font-size: 10px; font-weight: 600; letter-spacing: .03em; color: var(--good);
+    background: var(--good-bg); padding: 2px 6px; border-radius: 999px; }
+  .tpl .act { opacity: 0; color: var(--ink-faint); font-size: 12px; }
+  .tpl:hover .act { opacity: 1; }
+  .newbtn { margin-top: 10px; width: 100%; border: 1px dashed var(--line-strong); background: none;
+    color: var(--ink-soft); padding: 9px; border-radius: 8px; font-family: var(--sans); font-size: 13px;
+    cursor: pointer; }
+  .newbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { padding: 22px 26px 60px; max-width: 940px; }
+  .h1 { font-size: 21px; font-weight: 650; letter-spacing: -.01em; margin: 0 0 3px; }
+  .sub { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 18px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: var(--sheet);
+    border: 1px solid var(--line); border-radius: 10px 10px 0 0; box-shadow: var(--shadow); }
+  .tb { border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 12.5px; padding: 6px 11px; border-radius: 7px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; }
+  .tb:hover { border-color: var(--accent); color: var(--accent); }
+  .tb.primary { margin-left: auto; background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tb .dot { width: 8px; height: 8px; border-radius: 2px; background: var(--var); }
+  .tb .dot.tag { background: var(--tag); }
+
+  /* code editor */
+  .editor { display: grid; grid-template-columns: 44px 1fr; background: var(--code-bg);
+    border: 1px solid var(--line); border-top: none; border-radius: 0 0 10px 10px; box-shadow: var(--shadow);
+    overflow: hidden; }
+  .gutter { padding: 16px 0; text-align: right; color: var(--gutter); font-family: var(--mono);
+    font-size: 12.5px; line-height: 1.95; user-select: none; border-right: 1px solid var(--line); }
+  .gutter span { display: block; padding-right: 10px; }
+  .code { margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 13px; line-height: 1.95;
+    color: var(--text-tok); white-space: pre-wrap; overflow-x: auto; tab-size: 2; }
+
+  .var { color: var(--var); background: var(--var-bg); border-radius: 4px; padding: 0 3px; }
+  .tag { color: var(--tag); background: var(--tag-bg); border-radius: 4px; padding: 0 3px; font-weight: 550; }
+  .filt { color: var(--filt); }
+
+  .row2 { display: grid; grid-template-columns: 1fr 300px; gap: 16px; margin-top: 16px; align-items: start; }
+  @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+
+  .pop { background: var(--sheet); border: 1px solid var(--line-strong); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 12px; }
+  .pop .cap { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent);
+    font-weight: 600; margin: 0 2px 8px; }
+  .pop h3 { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 12px 4px 6px; font-weight: 600; }
+  .pop h3:first-of-type { margin-top: 2px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pchip { font-family: var(--mono); font-size: 11.5px; background: var(--var-bg); color: var(--var);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+  .pchip:hover { border-color: var(--var); }
+
+  .note { background: var(--tag-bg); border-left: 3px solid var(--tag); border-radius: 0 8px 8px 0;
+    padding: 11px 13px; font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; }
+  .note b { color: var(--tag); }
+  .note code { font-family: var(--mono); font-size: 11.5px; }
+
+  .foot { margin-top: 26px; color: var(--ink-faint); font-size: 12.5px; border-top: 1px solid var(--line);
+    padding-top: 14px; line-height: 1.6; }
+  .foot b { color: var(--ink-soft); font-weight: 600; }
+  .foot code { font-family: var(--mono); font-size: 11.5px; background: var(--var-bg); color: var(--var);
+    padding: 0 4px; border-radius: 4px; }
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <h2>My Templates</h2>
+    <div class="tpl active"><span class="name">Formal / Academic</span><span class="badge-default">DEFAULT</span></div>
+    <div class="tpl"><span class="name">Research / Graduate School</span><span class="act">···</span></div>
+    <div class="tpl"><span class="name">General Purpose</span><span class="act">···</span></div>
+    <div class="tpl"><span class="name">Industry / Internship</span><span class="act">···</span></div>
+    <button class="newbtn">+ New template</button>
+    <h2 style="margin-top:22px">Starter Library</h2>
+    <div class="tpl"><span class="name">Formal / Academic</span><span class="act">Duplicate</span></div>
+    <div class="tpl"><span class="name">Research / Graduate</span><span class="act">Duplicate</span></div>
+  </aside>
+
+  <main class="main">
+    <h1 class="h1">Formal / Academic</h1>
+    <p class="sub">You edit the real template text. Fields and conditions are <b>colour-coded and inserted for you</b> — you never hand-type a brace, and what you see is exactly what gets saved.</p>
+
+    <div class="toolbar">
+      <button class="tb"><span class="dot"></span>Insert field</button>
+      <button class="tb"><span class="dot tag"></span>Insert optional section</button>
+      <button class="tb">Preview letter</button>
+      <button class="tb primary">Save template</button>
+    </div>
+
+    <div class="editor">
+      <div class="gutter"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span></div>
+<div class="code"><span class="var">{{ today }}</span>
+
+To Whom It May Concern
+
+Re: Letter of Recommendation for <span class="var">{{ app.name }}</span>
+
+It is my pleasure to recommend <span class="var">{{ app.name }}</span><span class="tag">{% if app.std.program.program_name %}</span>, a student of the <span class="var">{{ app.std.program.program_name }}</span> program<span class="tag">{% endif %}</span> at the Institute of Engineering, Pulchowk Campus.
+
+I have known <span class="var">{{ app.name }}</span> as <span class="var">{{ pronoun_pos<span class="filt">|lower</span> }}</span> <span class="var">{{ rel_desc }}</span><span class="tag">{% if subjects_sentence %}</span>, having taught <span class="var">{{ pronoun_obj<span class="filt">|lower</span> }}</span> in <span class="var">{{ subjects_sentence }}</span><span class="tag">{% endif %}</span>.
+
+<span class="tag">{%- if academics and academics.gpa %}</span>
+<span class="var">{{ pronoun_pos }}</span> cumulative GPA is <span class="var">{{ academics.gpa }}</span>.
+<span class="tag">{%- endif %}</span>
+
+I recommend <span class="var">{{ pronoun_obj<span class="filt">|lower</span> }}</span> <span class="var">{{ strength_phrase }}</span>.
+
+Sincerely,
+<span class="var">{{ teacher.name }}</span></div>
+    </div>
+
+    <div class="row2">
+      <div class="note">
+        <b>“Insert optional section”</b> drops in a ready-made block —<br>
+        <code>{% if <em>…field…</em> %} your text {% endif %}</code> — with the field picked from a menu.
+        You type only the sentence in the middle. No memorising Jinja, no unbalanced tags: the opening
+        and closing tags are always inserted together.
+      </div>
+
+      <div class="pop">
+        <div class="cap">Insert field ▾</div>
+        <h3>Student</h3>
+        <div class="grid">
+          <span class="pchip">app.name</span><span class="pchip">firstname</span>
+          <span class="pchip">program</span><span class="pchip">department</span>
+          <span class="pchip">ranking</span><span class="pchip">rel_desc</span>
+        </div>
+        <h3>Academics &amp; Quality</h3>
+        <div class="grid">
+          <span class="pchip">academics.gpa</span><span class="pchip">quality.quality</span>
+          <span class="pchip">strength_phrase</span><span class="pchip">subjects_sentence</span>
+        </div>
+        <h3>Teacher</h3>
+        <div class="grid">
+          <span class="pchip">teacher.name</span><span class="pchip">teacher.email</span>
+          <span class="pchip">teacher.title</span><span class="pchip">teacher.phone</span>
+        </div>
+        <h3>Pronouns &amp; Dates</h3>
+        <div class="grid">
+          <span class="pchip">pronoun</span><span class="pchip">pronoun_obj</span>
+          <span class="pchip">pronoun_pos</span><span class="pchip">today</span><span class="pchip">deadline</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <b>How it differs from the chip mockup:</b> braces stay <em>visible but coloured</em> —
+      <code>{{ field }}</code> in indigo, <code>{% if %}</code> in teal — instead of being hidden inside
+      chips. Same accurate palette, same optional-section helper, same visible list + Delete + Set default.
+      <b>The trade:</b> slightly less pretty, but it <b>cannot silently corrupt a template</b>, and it ships fast.
+    </div>
+  </main>
+</div>
